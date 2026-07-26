@@ -239,12 +239,24 @@ private fun MovieShowtimes(title: String, genre: String?, screenings: List<Scree
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer,
                 ) {
-                    Text(
-                        formatShowtime(s.startTime),
+                    Column(
                         Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            formatShowtime(s.startTime),
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        s.hall?.let { hall ->
+                            Text(
+                                hall,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    .copy(alpha = 0.7f),
+                            )
+                        }
+                    }
                 }
             }
         }
