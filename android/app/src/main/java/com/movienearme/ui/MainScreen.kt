@@ -9,7 +9,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,50 +32,68 @@ import java.util.Locale
 fun MainScreen(vm: MapViewModel) {
     val state by vm.state.collectAsState()
 
-    Box(Modifier.fillMaxSize()) {
-        OsmMap(
-            cinemas = state.cinemas,
-            userLocation = state.userLocation,
-            selectedCinemaId = state.selectedCinema?.id,
-            onCinemaClick = { vm.selectCinema(it) },
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        FilterBar(
-            movies = state.movies,
-            selectedMovie = state.selectedMovie,
-            timeWindow = state.timeWindow,
-            resultCount = state.cinemas.size,
-            onMovieSelected = vm::selectMovie,
-            onTimeWindowSelected = vm::selectTimeWindow,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(12.dp),
-        )
-
-        if (state.loading) {
-            LinearProgressIndicator(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .statusBarsPadding()
+    // Swipe down to reload. Because the map consumes drag gestures for panning,
+    // the gesture is most reliable over the top filter bar; the refresh button
+    // works everywhere.
+    PullToRefreshBox(
+        isRefreshing = state.loading,
+        onRefresh = { vm.refresh() },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            OsmMap(
+                cinemas = state.cinemas,
+                userLocation = state.userLocation,
+                selectedCinemaId = state.selectedCinema?.id,
+                onCinemaClick = { vm.selectCinema(it) },
+                modifier = Modifier.fillMaxSize(),
             )
-        }
 
-        state.error?.let { msg ->
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
+            FilterBar(
+                movies = state.movies,
+                selectedMovie = state.selectedMovie,
+                timeWindow = state.timeWindow,
+                resultCount = state.cinemas.size,
+                onMovieSelected = vm::selectMovie,
+                onTimeWindowSelected = vm::selectTimeWindow,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(12.dp),
+            )
+
+            FloatingActionButton(
+                onClick = { vm.refresh() },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
                     .padding(16.dp),
-                shape = RoundedCornerShape(12.dp),
             ) {
-                Text(
-                    msg,
-                    Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
+                if (state.loading) {
+                    CircularProgressIndicator(
+                        Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                } else {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                }
+            }
+
+            state.error?.let { msg ->
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        msg,
+                        Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
             }
         }
     }

@@ -25,7 +25,7 @@ data class MapUiState(
     val movies: List<Movie> = emptyList(),
     val cinemas: List<Cinema> = emptyList(),
     val selectedMovie: Movie? = null,
-    val timeWindow: TimeWindow = TimeWindow.ANY,
+    val timeWindow: TimeWindow = TimeWindow.TODAY,
     val userLocation: LatLng? = null,
     val selectedCinema: Cinema? = null,
 )
