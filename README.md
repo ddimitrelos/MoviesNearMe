@@ -69,11 +69,12 @@ python -m app.scraper
 curl -X POST "http://localhost:8000/admin/scrape?limit=5"
 ```
 
-The scraper (`app/scraper.py`) is deliberately defensive: athinorama's markup
-shifts over time, so each field is best-effort and a missing field never crashes
-the run. The Greek day-range parser (`Πέμ.-Τετ.` → the wrapped week) and the
-coordinate extractor are pure functions with self-checks — if the site layout
-changes, adjust the CSS selectors in `parse_hall` / `parse_schedule`.
+The scraper (`app/scraper.py`) parses the **schema.org JSON-LD** that athinorama
+embeds on every hall page — a `MovieTheater` object (name, address, geo, phone)
+plus one `ScreeningEvent` per showing (ISO `startDate`, and a nested `Movie`
+with Greek `name` + English `alternateName`). This is far more robust than
+scraping markup. A full run currently yields ~111 cinemas and ~3,000 screenings.
+Parsing is best-effort: a malformed JSON-LD block is skipped, never fatal.
 
 ---
 
