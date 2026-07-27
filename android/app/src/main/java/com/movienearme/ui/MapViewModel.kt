@@ -28,6 +28,35 @@ fun TimeFilter.hours(settings: AppSettings): Double? = when (this) {
     TimeFilter.QUICK_B -> settings.filterBHours.toDouble()
 }
 
+/** The exact parameters a /cinemas request should use for a given UI state. */
+data class CinemaQuery(
+    val movieId: Int?,
+    val withinHours: Double?,
+    val lat: Double?,
+    val lng: Double?,
+    val summerOnly: Boolean,
+    val maxKm: Double?,
+)
+
+/**
+ * Pure mapping from UI state to request parameters (no Android/network deps, so
+ * it's cheap to unit-test). "Near me" measures from the selected POI origin if
+ * one is chosen, otherwise from the user's GPS location.
+ */
+fun MapUiState.toCinemaQuery(): CinemaQuery {
+    val originPoi = settings.nearMeOriginId?.let { id -> settings.pois.find { it.id == id } }
+    val lat = if (nearMe && originPoi != null) originPoi.lat else userLocation?.lat
+    val lng = if (nearMe && originPoi != null) originPoi.lng else userLocation?.lng
+    return CinemaQuery(
+        movieId = selectedMovie?.id,
+        withinHours = timeFilter.hours(settings),
+        lat = lat,
+        lng = lng,
+        summerOnly = summerOnly,
+        maxKm = if (nearMe) settings.nearMeKm.toDouble() else null,
+    )
+}
+
 data class MapUiState(
     val loading: Boolean = false,
     val waking: Boolean = false,
@@ -154,23 +183,17 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             // The cloud backend may be asleep (free tier) and take up to ~50s to
             // wake. Retry a few times with backoff, showing a friendly message,
             // before giving up.
-            // "Near me" measures from the chosen POI origin if one is selected,
-            // otherwise from the user's GPS location.
-            val originPoi = s.settings.nearMeOriginId
-                ?.let { id -> s.settings.pois.find { it.id == id } }
-            val originLat = if (s.nearMe && originPoi != null) originPoi.lat else s.userLocation?.lat
-            val originLng = if (s.nearMe && originPoi != null) originPoi.lng else s.userLocation?.lng
-
+            val q = s.toCinemaQuery()
             val attempts = 5
             for (attempt in 0 until attempts) {
                 try {
                     val cinemas = api.getCinemas(
-                        movieId = s.selectedMovie?.id,
-                        withinHours = s.timeFilter.hours(s.settings),
-                        lat = originLat,
-                        lng = originLng,
-                        summerOnly = s.summerOnly,
-                        maxKm = if (s.nearMe) s.settings.nearMeKm.toDouble() else null,
+                        movieId = q.movieId,
+                        withinHours = q.withinHours,
+                        lat = q.lat,
+                        lng = q.lng,
+                        summerOnly = q.summerOnly,
+                        maxKm = q.maxKm,
                     )
                     _state.value = _state.value.copy(
                         loading = false, waking = false, error = false, cinemas = cinemas,

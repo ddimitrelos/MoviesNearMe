@@ -22,6 +22,8 @@ android {
         val apiBaseUrl = (project.findProperty("apiBaseUrl") as String?)
             ?: "http://10.0.2.2:8000/"
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -77,4 +79,16 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Unit tests (JVM, no emulator)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+
+    // Instrumented / Compose UI tests (run on the emulator)
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.02"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
