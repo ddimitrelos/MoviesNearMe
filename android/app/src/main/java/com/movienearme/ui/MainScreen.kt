@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -306,15 +307,24 @@ private fun MovieDropdown(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        CinemaDetails(cinema)
+    }
+}
+
+/** Scrollable cinema detail content (extracted so it can be UI-tested directly). */
+@Composable
+internal fun CinemaDetails(cinema: Cinema) {
     val context = LocalContext.current
     val noMapsMsg = stringResource(R.string.no_directions_app)
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-        ) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp)
+    ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Color(0xFFE50914))
                 Spacer(Modifier.width(8.dp))
@@ -379,7 +389,6 @@ private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
                     Spacer(Modifier.height(14.dp))
                 }
             }
-        }
     }
 }
 
