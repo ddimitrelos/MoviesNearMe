@@ -15,8 +15,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.movienearme.R
 import com.movienearme.location.LatLng
 import org.osmdroid.config.Configuration
@@ -24,6 +22,11 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 
+/**
+ * Full-screen map picker (a plain overlay, not a Dialog, so system-bar inset
+ * padding works the same as the main screen). Move the map under the centre pin
+ * and save, then name the place.
+ */
 @Composable
 fun PoiPicker(
     initial: LatLng?,
@@ -51,71 +54,67 @@ fun PoiPicker(
     var pickedLng by remember { mutableStateOf(0.0) }
     var label by remember { mutableStateOf("") }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize()) {
-                AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+    Surface(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-                // Center pin — its tip marks the map centre.
-                Icon(
-                    Icons.Filled.Place,
-                    contentDescription = null,
-                    tint = Color(0xFF7C4DFF),
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(48.dp)
-                        .offset(y = (-24).dp),
-                )
+            // Center pin — its tip marks the map centre.
+            Icon(
+                Icons.Filled.Place,
+                contentDescription = null,
+                tint = Color(0xFF7C4DFF),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(48.dp)
+                    .offset(y = (-24).dp),
+            )
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .statusBarsPadding()
-                        .padding(8.dp),
-                ) {
-                    Surface(shape = RoundedCornerShape(50), tonalElevation = 4.dp) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.cancel),
-                            modifier = Modifier.padding(6.dp))
-                    }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(8.dp),
+            ) {
+                Surface(shape = RoundedCornerShape(50), tonalElevation = 4.dp) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.cancel),
+                        modifier = Modifier.padding(6.dp))
                 }
+            }
 
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    tonalElevation = 4.dp,
+                    shadowElevation = 6.dp,
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        tonalElevation = 4.dp,
-                        shadowElevation = 6.dp,
-                    ) {
-                        Text(
-                            stringResource(R.string.poi_pick_hint),
-                            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            val c = mapView.mapCenter
-                            pickedLat = c.latitude
-                            pickedLng = c.longitude
-                            label = ""
-                            showName = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Filled.Place, contentDescription = null,
-                            modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.poi_save_here))
-                    }
+                    Text(
+                        stringResource(R.string.poi_pick_hint),
+                        Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        val c = mapView.mapCenter
+                        pickedLat = c.latitude
+                        pickedLng = c.longitude
+                        label = ""
+                        showName = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Filled.Place, contentDescription = null,
+                        modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.poi_save_here))
                 }
             }
         }

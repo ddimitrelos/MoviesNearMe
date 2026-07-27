@@ -42,6 +42,7 @@ import java.util.Locale
 fun MainScreen(vm: MapViewModel) {
     val state by vm.state.collectAsState()
 
+    Box(Modifier.fillMaxSize()) {
     PullToRefreshBox(
         isRefreshing = state.loading,
         onRefresh = { vm.refresh() },
@@ -146,7 +147,7 @@ fun MainScreen(vm: MapViewModel) {
         SettingsSheet(
             settings = state.settings,
             onChange = vm::updateSettings,
-            onAddPoi = { vm.openPoiPicker(true) },
+            onAddPoi = { vm.openSettings(false); vm.openPoiPicker(true) },
             onRemovePoi = vm::removePoi,
             onSetOrigin = vm::setNearMeOrigin,
             onDismiss = { vm.openSettings(false) },
@@ -157,8 +158,9 @@ fun MainScreen(vm: MapViewModel) {
         PoiPicker(
             initial = state.userLocation,
             onAdd = { label, lat, lng -> vm.addPoi(label, lat, lng) },
-            onDismiss = { vm.openPoiPicker(false) },
+            onDismiss = { vm.openPoiPicker(false); vm.openSettings(true) },
         )
+    }
     }
 }
 
