@@ -1,0 +1,44 @@
+<resources>
+    <string name="app_name">MovieNearMe</string>
+
+    <!-- Filters -->
+    <string name="movie_label">Ταινία</string>
+    <string name="all_movies">Όλες οι ταινίες</string>
+    <string name="time_any">Οποτεδήποτε</string>
+    <string name="time_next_hours">Επόμενες %1$dω</string>
+    <string name="time_today">Σήμερα</string>
+    <string name="filter_summer">Θερινά</string>
+    <string name="filter_near_me">Κοντά μου</string>
+    <string name="cinemas_count">%1$d κινηματογράφοι</string>
+    <string name="suffix_summer">· θερινά</string>
+    <string name="suffix_near_me">· κοντά μου</string>
+
+    <!-- Cinema sheet -->
+    <string name="directions">Οδηγίες</string>
+    <string name="open_air">Θερινό</string>
+    <string name="no_screenings">Δεν υπάρχουν προβολές για τα φίλτρα σας.</string>
+    <string name="km_away">%1$.1f χλμ μακριά</string>
+    <string name="no_directions_app">Δεν υπάρχει εφαρμογή για οδηγίες</string>
+
+    <!-- Status -->
+    <string name="waking_server">Ξυπνάει ο διακομιστής…</string>
+    <string name="error_unreachable">Δεν είναι δυνατή η σύνδεση. Ελέγξτε τη σύνδεσή σας και πατήστε ανανέωση.</string>
+    <string name="refresh">Ανανέωση</string>
+    <string name="you_are_here">Είστε εδώ</string>
+
+    <!-- Settings -->
+    <string name="settings">Ρυθμίσεις</string>
+    <string name="settings_language">Γλώσσα</string>
+    <string name="lang_system">Προεπιλογή συστήματος</string>
+    <string name="lang_en">English</string>
+    <string name="lang_el">Ελληνικά</string>
+    <string name="settings_near_me_radius">Ακτίνα «Κοντά μου»</string>
+    <string name="settings_km">%1$d χλμ</string>
+    <string name="settings_quick_filters">Γρήγορα φίλτρα χρόνου</string>
+    <string name="settings_filter_one">Γρήγορο φίλτρο 1</string>
+    <string name="settings_filter_two">Γρήγορο φίλτρο 2</string>
+    <string name="settings_hours">%1$d ώρες</string>
+    <string name="settings_show_filter">Εμφάνιση αυτού του φίλτρου</string>
+    <string name="close">Κλείσιμο</string>
+    <string name="open_settings">Άνοιγμα ρυθμίσεων</string>
+</resources>

@@ -1,7 +1,10 @@
 package com.movienearme.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.movienearme.data.AppSettings
+import com.movienearme.data.SettingsStore
 import com.movienearme.data.api.ApiClient
 import com.movienearme.data.model.Cinema
 import com.movienearme.data.model.Movie
@@ -12,36 +15,38 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Time-window options for the showtime filter. */
-enum class TimeWindow(val label: String, val hours: Double?) {
-    ANY("Any time", null),
-    NEXT_3H("Next 3h", 3.0),
-    NEXT_6H("Next 6h", 6.0),
-    TODAY("Today", 24.0),
+/** Which time window is selected. Hours for the two quick filters come from settings. */
+enum class TimeFilter { ANY, QUICK_A, QUICK_B, TODAY }
+
+fun TimeFilter.hours(settings: AppSettings): Double? = when (this) {
+    TimeFilter.ANY -> null
+    TimeFilter.TODAY -> 24.0
+    TimeFilter.QUICK_A -> settings.filterAHours.toDouble()
+    TimeFilter.QUICK_B -> settings.filterBHours.toDouble()
 }
 
 data class MapUiState(
     val loading: Boolean = false,
-    val loadingMessage: String? = null,
-    val error: String? = null,
+    val waking: Boolean = false,
+    val error: Boolean = false,
     val movies: List<Movie> = emptyList(),
     val cinemas: List<Cinema> = emptyList(),
     val selectedMovie: Movie? = null,
-    val timeWindow: TimeWindow = TimeWindow.TODAY,
+    val timeFilter: TimeFilter = TimeFilter.TODAY,
     val summerOnly: Boolean = false,
     val nearMe: Boolean = false,
     val userLocation: LatLng? = null,
     val selectedCinema: Cinema? = null,
+    val settings: AppSettings = AppSettings(),
+    val showSettings: Boolean = false,
 )
 
-// Radius (km) used by the "Near me" filter.
-private const val NEAR_ME_KM = 5.0
-
-class MapViewModel : ViewModel() {
+class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private val api = ApiClient.service
+    private val store = SettingsStore(app)
 
-    private val _state = MutableStateFlow(MapUiState())
+    private val _state = MutableStateFlow(MapUiState(settings = store.load()))
     val state: StateFlow<MapUiState> = _state.asStateFlow()
 
     fun setUserLocation(loc: LatLng) {
@@ -70,8 +75,8 @@ class MapViewModel : ViewModel() {
         refresh()
     }
 
-    fun selectTimeWindow(window: TimeWindow) {
-        _state.value = _state.value.copy(timeWindow = window)
+    fun selectTimeFilter(filter: TimeFilter) {
+        _state.value = _state.value.copy(timeFilter = filter)
         refresh()
     }
 
@@ -89,50 +94,56 @@ class MapViewModel : ViewModel() {
         _state.value = _state.value.copy(selectedCinema = cinema)
     }
 
+    fun openSettings(open: Boolean) {
+        _state.value = _state.value.copy(showSettings = open)
+    }
+
+    fun updateSettings(settings: AppSettings) {
+        store.save(settings)
+        val prev = _state.value
+        // If the selected quick filter got disabled, fall back to Today.
+        val newFilter = when {
+            prev.timeFilter == TimeFilter.QUICK_A && !settings.filterAEnabled -> TimeFilter.TODAY
+            prev.timeFilter == TimeFilter.QUICK_B && !settings.filterBEnabled -> TimeFilter.TODAY
+            else -> prev.timeFilter
+        }
+        _state.value = prev.copy(settings = settings, timeFilter = newFilter)
+        refresh()
+    }
+
     fun refresh() {
         val s = _state.value
         // Also refresh the movie list, so a manual refresh heals a dropdown that
         // was loaded during a cold start (seed data).
         loadMovies()
         viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true, error = null)
+            _state.value = _state.value.copy(loading = true, error = false)
             // The cloud backend may be asleep (free tier) and take up to ~50s to
             // wake. Retry a few times with backoff, showing a friendly message,
             // before giving up.
-            var lastError: Exception? = null
             val attempts = 5
             for (attempt in 0 until attempts) {
                 try {
                     val cinemas = api.getCinemas(
                         movieId = s.selectedMovie?.id,
-                        withinHours = s.timeWindow.hours,
+                        withinHours = s.timeFilter.hours(s.settings),
                         lat = s.userLocation?.lat,
                         lng = s.userLocation?.lng,
                         summerOnly = s.summerOnly,
-                        maxKm = if (s.nearMe) NEAR_ME_KM else null,
+                        maxKm = if (s.nearMe) s.settings.nearMeKm.toDouble() else null,
                     )
                     _state.value = _state.value.copy(
-                        loading = false, loadingMessage = null,
-                        error = null, cinemas = cinemas,
+                        loading = false, waking = false, error = false, cinemas = cinemas,
                     )
                     return@launch
                 } catch (e: Exception) {
-                    lastError = e
                     if (attempt < attempts - 1) {
-                        _state.value = _state.value.copy(
-                            loadingMessage = "Waking up the server…",
-                        )
+                        _state.value = _state.value.copy(waking = true)
                         delay(6000L)
                     }
                 }
             }
-            _state.value = _state.value.copy(
-                loading = false, loadingMessage = null, error = friendly(lastError),
-            )
+            _state.value = _state.value.copy(loading = false, waking = false, error = true)
         }
     }
-
-    private fun friendly(e: Exception?): String =
-        "Can't reach the server. Check your connection and tap refresh. " +
-            "(${e?.message ?: "unknown error"})"
 }

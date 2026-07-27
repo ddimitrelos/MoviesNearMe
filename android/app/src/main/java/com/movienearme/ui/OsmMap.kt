@@ -21,6 +21,7 @@ fun OsmMap(
     cinemas: List<Cinema>,
     userLocation: LatLng?,
     selectedCinemaId: Int?,
+    youAreHere: String,
     onCinemaClick: (Cinema) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -50,7 +51,7 @@ fun OsmMap(
                 val me = Marker(map).apply {
                     position = GeoPoint(it.lat, it.lng)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    title = "You are here"
+                    title = youAreHere
                     icon = dotDrawable(0xFF2979FF.toInt())
                 }
                 map.overlays.add(me)

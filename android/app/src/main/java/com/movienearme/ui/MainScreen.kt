@@ -3,7 +3,6 @@ package com.movienearme.ui
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -15,6 +14,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -23,9 +23,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.movienearme.R
+import com.movienearme.data.AppSettings
 import com.movienearme.data.model.Cinema
 import com.movienearme.data.model.Movie
 import com.movienearme.data.model.ScreeningBrief
@@ -39,9 +42,6 @@ import java.util.Locale
 fun MainScreen(vm: MapViewModel) {
     val state by vm.state.collectAsState()
 
-    // Swipe down to reload. Because the map consumes drag gestures for panning,
-    // the gesture is most reliable over the top filter bar; the refresh button
-    // works everywhere.
     PullToRefreshBox(
         isRefreshing = state.loading,
         onRefresh = { vm.refresh() },
@@ -52,6 +52,7 @@ fun MainScreen(vm: MapViewModel) {
                 cinemas = state.cinemas,
                 userLocation = state.userLocation,
                 selectedCinemaId = state.selectedCinema?.id,
+                youAreHere = stringResource(R.string.you_are_here),
                 onCinemaClick = { vm.selectCinema(it) },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -59,14 +60,16 @@ fun MainScreen(vm: MapViewModel) {
             FilterBar(
                 movies = state.movies,
                 selectedMovie = state.selectedMovie,
-                timeWindow = state.timeWindow,
+                timeFilter = state.timeFilter,
+                settings = state.settings,
                 summerOnly = state.summerOnly,
                 nearMe = state.nearMe,
                 resultCount = state.cinemas.size,
                 onMovieSelected = vm::selectMovie,
-                onTimeWindowSelected = vm::selectTimeWindow,
+                onSelectTimeFilter = vm::selectTimeFilter,
                 onToggleSummer = vm::toggleSummerOnly,
                 onToggleNearMe = vm::toggleNearMe,
+                onOpenSettings = { vm.openSettings(true) },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
@@ -87,11 +90,11 @@ fun MainScreen(vm: MapViewModel) {
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.refresh))
                 }
             }
 
-            state.loadingMessage?.let { msg ->
+            if (state.waking) {
                 Surface(
                     color = MaterialTheme.colorScheme.tertiaryContainer,
                     modifier = Modifier
@@ -110,12 +113,13 @@ fun MainScreen(vm: MapViewModel) {
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                         )
-                        Text(msg, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Text(stringResource(R.string.waking_server),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer)
                     }
                 }
             }
 
-            state.error?.let { msg ->
+            if (state.error) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
                     modifier = Modifier
@@ -124,7 +128,7 @@ fun MainScreen(vm: MapViewModel) {
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(
-                        msg,
+                        stringResource(R.string.error_unreachable),
                         Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
@@ -136,6 +140,14 @@ fun MainScreen(vm: MapViewModel) {
     state.selectedCinema?.let { cinema ->
         CinemaSheet(cinema = cinema, onDismiss = { vm.selectCinema(null) })
     }
+
+    if (state.showSettings) {
+        SettingsSheet(
+            settings = state.settings,
+            onChange = vm::updateSettings,
+            onDismiss = { vm.openSettings(false) },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,14 +155,16 @@ fun MainScreen(vm: MapViewModel) {
 private fun FilterBar(
     movies: List<Movie>,
     selectedMovie: Movie?,
-    timeWindow: TimeWindow,
+    timeFilter: TimeFilter,
+    settings: AppSettings,
     summerOnly: Boolean,
     nearMe: Boolean,
     resultCount: Int,
     onMovieSelected: (Movie?) -> Unit,
-    onTimeWindowSelected: (TimeWindow) -> Unit,
+    onSelectTimeFilter: (TimeFilter) -> Unit,
     onToggleSummer: () -> Unit,
     onToggleNearMe: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -162,15 +176,29 @@ private fun FilterBar(
         Column(Modifier.padding(12.dp)) {
             MovieDropdown(movies, selectedMovie, onMovieSelected)
             Spacer(Modifier.height(8.dp))
+
+            // Time filters: Any, the enabled quick filters, Today.
+            val timeChips = buildList {
+                add(TimeFilter.ANY to stringResource(R.string.time_any))
+                if (settings.filterAEnabled) {
+                    add(TimeFilter.QUICK_A to
+                        stringResource(R.string.time_next_hours, settings.filterAHours))
+                }
+                if (settings.filterBEnabled) {
+                    add(TimeFilter.QUICK_B to
+                        stringResource(R.string.time_next_hours, settings.filterBHours))
+                }
+                add(TimeFilter.TODAY to stringResource(R.string.time_today))
+            }
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TimeWindow.entries.forEach { w ->
+                timeChips.forEach { (f, label) ->
                     FilterChip(
-                        selected = timeWindow == w,
-                        onClick = { onTimeWindowSelected(w) },
-                        label = { Text(w.label) },
+                        selected = timeFilter == f,
+                        onClick = { onSelectTimeFilter(f) },
+                        label = { Text(label) },
                     )
                 }
             }
@@ -179,7 +207,7 @@ private fun FilterBar(
                 FilterChip(
                     selected = summerOnly,
                     onClick = onToggleSummer,
-                    label = { Text("Summer") },
+                    label = { Text(stringResource(R.string.filter_summer)) },
                     leadingIcon = {
                         Icon(Icons.Filled.WbSunny, contentDescription = null,
                             modifier = Modifier.size(18.dp))
@@ -188,7 +216,7 @@ private fun FilterBar(
                 FilterChip(
                     selected = nearMe,
                     onClick = onToggleNearMe,
-                    label = { Text("Near me") },
+                    label = { Text(stringResource(R.string.filter_near_me)) },
                     leadingIcon = {
                         Icon(Icons.Filled.NearMe, contentDescription = null,
                             modifier = Modifier.size(18.dp))
@@ -196,14 +224,25 @@ private fun FilterBar(
                 )
             }
             Spacer(Modifier.height(6.dp))
-            Text(
-                text = "$resultCount cinemas" +
-                    (if (summerOnly) " · summer" else "") +
-                    (if (nearMe) " · near me" else "") +
-                    (selectedMovie?.let { " · ${it.title}" } ?: ""),
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val label = buildString {
+                    append(stringResource(R.string.cinemas_count, resultCount))
+                    if (summerOnly) { append(" "); append(stringResource(R.string.suffix_summer)) }
+                    if (nearMe) { append(" "); append(stringResource(R.string.suffix_near_me)) }
+                    selectedMovie?.let { append(" · "); append(it.title) }
+                }
+                Text(
+                    text = label,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onOpenSettings, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Settings,
+                        contentDescription = stringResource(R.string.open_settings),
+                        modifier = Modifier.size(20.dp))
+                }
+            }
         }
     }
 }
@@ -216,24 +255,25 @@ private fun MovieDropdown(
     onSelected: (Movie?) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val allMovies = stringResource(R.string.all_movies)
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it },
     ) {
         OutlinedTextField(
-            value = selected?.title ?: "All movies",
+            value = selected?.title ?: allMovies,
             onValueChange = {},
             readOnly = true,
             leadingIcon = { Icon(Icons.Filled.Movie, contentDescription = null) },
             trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
-            label = { Text("Movie") },
+            label = { Text(stringResource(R.string.movie_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("All movies") },
+                text = { Text(allMovies) },
                 onClick = { onSelected(null); expanded = false },
             )
             movies.forEach { movie ->
@@ -250,6 +290,7 @@ private fun MovieDropdown(
 @Composable
 private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val noMapsMsg = stringResource(R.string.no_directions_app)
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -280,7 +321,7 @@ private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
                                         modifier = Modifier.size(14.dp),
                                     )
                                     Text(
-                                        "Open-air",
+                                        stringResource(R.string.open_air),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White,
@@ -289,10 +330,10 @@ private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
                             }
                         }
                     }
-                    val sub = buildString {
-                        cinema.address?.let { append(it) }
-                        cinema.distanceKm?.let { append("  ·  %.1f km away".format(it)) }
-                    }
+                    val distance = cinema.distanceKm?.let {
+                        "  ·  " + stringResource(R.string.km_away, it)
+                    } ?: ""
+                    val sub = (cinema.address ?: "") + distance
                     if (sub.isNotBlank()) {
                         Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -302,19 +343,19 @@ private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
             if (cinema.lat != null && cinema.lng != null) {
                 Spacer(Modifier.height(14.dp))
                 FilledTonalButton(
-                    onClick = { openDirections(context, cinema) },
+                    onClick = { openDirections(context, cinema, noMapsMsg) },
                 ) {
                     Icon(Icons.Filled.Directions, contentDescription = null,
                         modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Directions")
+                    Text(stringResource(R.string.directions))
                 }
             }
 
             Spacer(Modifier.height(16.dp))
 
             if (cinema.screenings.isEmpty()) {
-                Text("No screenings match your filters.")
+                Text(stringResource(R.string.no_screenings))
             } else {
                 groupByMovie(cinema.screenings).forEach { (movie, showtimes) ->
                     MovieShowtimes(movie.title, movie.genre, showtimes)
@@ -368,7 +409,7 @@ private fun MovieShowtimes(title: String, genre: String?, screenings: List<Scree
 
 // --- helpers ---------------------------------------------------------------
 
-private fun openDirections(context: android.content.Context, cinema: Cinema) {
+private fun openDirections(context: android.content.Context, cinema: Cinema, noMapsMsg: String) {
     val lat = cinema.lat ?: return
     val lng = cinema.lng ?: return
     val label = Uri.encode(cinema.name)
@@ -388,8 +429,7 @@ private fun openDirections(context: android.content.Context, cinema: Cinema) {
         try {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e2: Exception) {
-            Toast.makeText(context, "No app available to show directions",
-                Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, noMapsMsg, Toast.LENGTH_SHORT).show()
         }
     }
 }
