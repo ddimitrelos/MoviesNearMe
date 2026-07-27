@@ -23,4 +23,4 @@ jobs:
           pip install -r requirements.txt pytest
       - name: Run tests
         working-directory: backend
-        run: pytest -q
+        run: python -m pytest -q

@@ -33,7 +33,7 @@ import com.movienearme.data.model.Movie
 
 private val CardColor = Color(0xF01C1C24)
 
-/** A fancy callout of tiny movie-poster cards for a cinema, with a pointer. */
+/** A fancy callout of tiny movie-poster cards (with showtimes) for a cinema. */
 @Composable
 fun PosterCallout(
     cinema: Cinema,
@@ -41,8 +41,12 @@ fun PosterCallout(
     onOpenDetails: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val movies = remember(cinema) {
-        cinema.screenings.map { it.movie }.distinctBy { it.id }
+    // Each movie with its sorted showtimes at this cinema.
+    val movies: List<Pair<Movie, List<String>>> = remember(cinema) {
+        cinema.screenings
+            .groupBy { it.movie.id }
+            .map { (_, list) -> list.first().movie to list.map { it.startTime }.sorted() }
+            .sortedBy { it.first.title }
     }
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
@@ -50,7 +54,7 @@ fun PosterCallout(
             color = CardColor,
             shadowElevation = 12.dp,
         ) {
-            Column(Modifier.widthIn(max = 300.dp).padding(12.dp)) {
+            Column(Modifier.widthIn(max = 340.dp).padding(12.dp)) {
                 Row(
                     Modifier.clickable { onOpenDetails() },
                     verticalAlignment = Alignment.CenterVertically,
@@ -73,9 +77,11 @@ fun PosterCallout(
                 Spacer(Modifier.height(10.dp))
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    movies.forEach { movie -> PosterCard(movie) { onPosterClick(movie) } }
+                    movies.forEach { (movie, times) ->
+                        MovieCard(movie, times) { onPosterClick(movie) }
+                    }
                 }
             }
         }
@@ -89,15 +95,16 @@ fun PosterCallout(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PosterCard(movie: Movie, onClick: () -> Unit) {
+private fun MovieCard(movie: Movie, times: List<String>, onClick: () -> Unit) {
     Column(
-        Modifier.width(74.dp).clickable(onClick = onClick),
+        Modifier.width(104.dp).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             Modifier
-                .size(width = 74.dp, height = 108.dp)
+                .size(width = 104.dp, height = 150.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color(0xFF2C2C36)),
             contentAlignment = Alignment.Center,
@@ -111,18 +118,36 @@ private fun PosterCard(movie: Movie, onClick: () -> Unit) {
                 )
             } else {
                 Icon(Icons.Filled.Movie, contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(28.dp))
+                    tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(30.dp))
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
             movie.title,
             color = Color.White,
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
+        Spacer(Modifier.height(4.dp))
+        // Showtimes as small chips, wrapping onto multiple lines.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            times.take(8).forEach { iso ->
+                Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF3A3A46)) {
+                    Text(
+                        formatShowtime(iso),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
     }
 }

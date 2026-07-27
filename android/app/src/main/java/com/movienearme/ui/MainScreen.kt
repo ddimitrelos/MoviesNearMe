@@ -504,7 +504,7 @@ private fun groupByMovie(screenings: List<ScreeningBrief>): List<Pair<Movie, Lis
 
 private val outFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-private fun formatShowtime(iso: String): String =
+internal fun formatShowtime(iso: String): String =
     try {
         val dt = LocalDateTime.parse(iso)
         val today = LocalDateTime.now().toLocalDate()
