@@ -31,7 +31,10 @@ fun OsmMap(
     selectedCinemaId: Int?,
     youAreHere: String,
     pois: List<Poi> = emptyList(),
+    selectedOriginPoiId: String? = null,
     onCinemaClick: (Cinema) -> Unit,
+    onPoiClick: (Poi) -> Unit = {},
+    onUserLocationClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -62,6 +65,8 @@ fun OsmMap(
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     title = youAreHere
                     icon = dotDrawable(0xFF2979FF.toInt())
+                    // Tap the "you are here" dot to measure Near me from my location.
+                    setOnMarkerClickListener { _, _ -> onUserLocationClick(); true }
                 }
                 map.overlays.add(me)
             }
@@ -88,13 +93,17 @@ fun OsmMap(
                 map.overlays.add(marker)
             }
 
-            // User points of interest (Home/Work…) — violet labeled chip.
+            // User points of interest (Home/Work…) — tap one to make it the
+            // Near me origin. The selected origin is shown gold, others violet.
             pois.forEach { poi ->
+                val selected = poi.id == selectedOriginPoiId
+                val chipColor = if (selected) 0xFFFFC107.toInt() else 0xFF7C4DFF.toInt()
                 val marker = Marker(map).apply {
                     position = GeoPoint(poi.lat, poi.lng)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    icon = labelChipDrawable(context.resources, poi.label)
+                    icon = labelChipDrawable(context.resources, poi.label, chipColor)
                     title = poi.label
+                    setOnMarkerClickListener { _, _ -> onPoiClick(poi); true }
                 }
                 map.overlays.add(marker)
             }
@@ -119,8 +128,8 @@ private fun pinDrawable(color: Int): GradientDrawable =
         setSize(52, 52)
     }
 
-/** A rounded violet chip with the POI label drawn in white — always visible on the map. */
-private fun labelChipDrawable(res: Resources, label: String): Drawable {
+/** A rounded chip with the POI label drawn in white — always visible on the map. */
+private fun labelChipDrawable(res: Resources, label: String, bgColor: Int): Drawable {
     val d = res.displayMetrics.density
     val padH = 10f * d
     val padV = 6f * d
@@ -136,7 +145,7 @@ private fun labelChipDrawable(res: Resources, label: String): Drawable {
     val h = (textH + padV * 2).toInt().coerceAtLeast(1)
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
-    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF7C4DFF.toInt() }
+    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor }
     val r = h / 2f
     canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r, r, bgPaint)
     val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

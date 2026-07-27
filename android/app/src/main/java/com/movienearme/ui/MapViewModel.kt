@@ -43,6 +43,14 @@ data class CinemaQuery(
  * it's cheap to unit-test). "Near me" measures from the selected POI origin if
  * one is chosen, otherwise from the user's GPS location.
  */
+/**
+ * State after choosing a "Near me" origin (a POI tapped on the map, or null for
+ * the user's location). Selecting an origin always turns Near me on. Pure, so
+ * it's unit-testable.
+ */
+fun MapUiState.selectingOrigin(poiId: String?): MapUiState =
+    copy(nearMe = true, settings = settings.copy(nearMeOriginId = poiId))
+
 fun MapUiState.toCinemaQuery(): CinemaQuery {
     val originPoi = settings.nearMeOriginId?.let { id -> settings.pois.find { it.id == id } }
     val lat = if (nearMe && originPoi != null) originPoi.lat else userLocation?.lat
@@ -152,10 +160,12 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setNearMeOrigin(id: String?) {
-        // Choosing a POI as the origin means "show cinemas near here", so turn
-        // the Near me filter on automatically.
-        if (id != null) _state.value = _state.value.copy(nearMe = true)
-        updateSettings(_state.value.settings.copy(nearMeOriginId = id))
+        // Selecting an origin (a POI tapped on the map, or "my location") turns
+        // Near me on and applies from that origin.
+        val next = _state.value.selectingOrigin(id)
+        store.save(next.settings)
+        _state.value = next
+        refresh()
     }
 
     fun updateSettings(settings: AppSettings) {

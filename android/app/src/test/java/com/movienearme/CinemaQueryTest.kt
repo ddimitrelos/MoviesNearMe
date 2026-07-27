@@ -6,9 +6,11 @@ import com.movienearme.data.model.Movie
 import com.movienearme.location.LatLng
 import com.movienearme.ui.MapUiState
 import com.movienearme.ui.TimeFilter
+import com.movienearme.ui.selectingOrigin
 import com.movienearme.ui.toCinemaQuery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -65,5 +67,35 @@ class CinemaQueryTest {
     fun movieFilter_passesMovieId() {
         val state = MapUiState(selectedMovie = Movie(id = 42, slug = "x", title = "X"))
         assertEquals(42, state.toCinemaQuery().movieId)
+    }
+
+    // --- Tapping a POI on the map selects it as the Near me origin ---
+
+    @Test
+    fun tappingPoi_enablesNearMe_andUsesItsCoordinates() {
+        val base = MapUiState(
+            userLocation = gps,
+            settings = AppSettings(pois = listOf(home), nearMeKm = 5),
+        )
+        val after = base.selectingOrigin("h1")
+        assertTrue("Near me should turn on", after.nearMe)
+        assertEquals("h1", after.settings.nearMeOriginId)
+        val q = after.toCinemaQuery()
+        assertEquals(38.07, q.lat!!, 1e-6)   // Home, not GPS
+        assertEquals(23.81, q.lng!!, 1e-6)
+    }
+
+    @Test
+    fun tappingMyLocation_enablesNearMe_fromGps() {
+        val base = MapUiState(
+            userLocation = gps,
+            settings = AppSettings(pois = listOf(home), nearMeOriginId = "h1"),
+        )
+        val after = base.selectingOrigin(null)
+        assertTrue(after.nearMe)
+        assertNull(after.settings.nearMeOriginId)
+        val q = after.toCinemaQuery()
+        assertEquals(37.9420, q.lat!!, 1e-6)  // back to GPS
+        assertEquals(23.6470, q.lng!!, 1e-6)
     }
 }

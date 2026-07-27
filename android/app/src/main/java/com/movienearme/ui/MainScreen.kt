@@ -55,7 +55,10 @@ fun MainScreen(vm: MapViewModel) {
                 selectedCinemaId = state.selectedCinema?.id,
                 youAreHere = stringResource(R.string.you_are_here),
                 pois = state.settings.pois,
+                selectedOriginPoiId = if (state.nearMe) state.settings.nearMeOriginId else null,
                 onCinemaClick = { vm.selectCinema(it) },
+                onPoiClick = { vm.setNearMeOrigin(it.id) },
+                onUserLocationClick = { vm.setNearMeOrigin(null) },
                 modifier = Modifier.fillMaxSize(),
             )
 
