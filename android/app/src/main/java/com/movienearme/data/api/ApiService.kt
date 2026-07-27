@@ -19,5 +19,7 @@ interface ApiService {
         @Query("within_hours") withinHours: Double? = null,
         @Query("lat") lat: Double? = null,
         @Query("lng") lng: Double? = null,
+        @Query("summer_only") summerOnly: Boolean = false,
+        @Query("max_km") maxKm: Double? = null,
     ): List<Cinema>
 }

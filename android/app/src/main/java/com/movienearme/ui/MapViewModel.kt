@@ -28,9 +28,14 @@ data class MapUiState(
     val cinemas: List<Cinema> = emptyList(),
     val selectedMovie: Movie? = null,
     val timeWindow: TimeWindow = TimeWindow.TODAY,
+    val summerOnly: Boolean = false,
+    val nearMe: Boolean = false,
     val userLocation: LatLng? = null,
     val selectedCinema: Cinema? = null,
 )
+
+// Radius (km) used by the "Near me" filter.
+private const val NEAR_ME_KM = 5.0
 
 class MapViewModel : ViewModel() {
 
@@ -65,6 +70,16 @@ class MapViewModel : ViewModel() {
         refresh()
     }
 
+    fun toggleSummerOnly() {
+        _state.value = _state.value.copy(summerOnly = !_state.value.summerOnly)
+        refresh()
+    }
+
+    fun toggleNearMe() {
+        _state.value = _state.value.copy(nearMe = !_state.value.nearMe)
+        refresh()
+    }
+
     fun selectCinema(cinema: Cinema?) {
         _state.value = _state.value.copy(selectedCinema = cinema)
     }
@@ -85,6 +100,8 @@ class MapViewModel : ViewModel() {
                         withinHours = s.timeWindow.hours,
                         lat = s.userLocation?.lat,
                         lng = s.userLocation?.lng,
+                        summerOnly = s.summerOnly,
+                        maxKm = if (s.nearMe) NEAR_ME_KM else null,
                     )
                     _state.value = _state.value.copy(
                         loading = false, loadingMessage = null,

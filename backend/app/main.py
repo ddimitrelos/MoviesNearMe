@@ -128,6 +128,8 @@ def list_cinemas(
     within_hours: Optional[float] = None,
     lat: Optional[float] = None,
     lng: Optional[float] = None,
+    summer_only: bool = False,
+    max_km: Optional[float] = None,
     db: Session = Depends(get_db),
 ):
     now = datetime.now()
@@ -151,13 +153,12 @@ def list_cinemas(
     for s in screenings:
         by_cinema.setdefault(s.cinema_id, []).append(s)
 
-    cinemas = (
-        db.query(models.Cinema)
-        .filter(models.Cinema.id.in_(by_cinema.keys()))
-        .all()
-        if by_cinema
-        else []
+    cinema_q = db.query(models.Cinema).filter(
+        models.Cinema.id.in_(by_cinema.keys())
     )
+    if summer_only:
+        cinema_q = cinema_q.filter(models.Cinema.is_summer.is_(True))
+    cinemas = cinema_q.all() if by_cinema else []
 
     result = []
     for c in cinemas:
@@ -170,6 +171,7 @@ def list_cinemas(
             "lat": c.lat,
             "lng": c.lng,
             "region": c.region,
+            "is_summer": bool(c.is_summer),
             "screenings": [
                 {
                     "id": s.id,
@@ -183,6 +185,14 @@ def list_cinemas(
         if lat is not None and lng is not None and c.lat and c.lng:
             item["distance_km"] = round(haversine_km(lat, lng, c.lat, c.lng), 2)
         result.append(item)
+
+    # "Near me": keep only cinemas within max_km of the user (needs a location
+    # and a known cinema position).
+    if max_km is not None and lat is not None and lng is not None:
+        result = [
+            x for x in result
+            if x.get("distance_km") is not None and x["distance_km"] <= max_km
+        ]
 
     if lat is not None and lng is not None:
         result.sort(key=lambda x: x.get("distance_km", 1e9))

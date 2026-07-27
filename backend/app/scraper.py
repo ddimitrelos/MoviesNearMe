@@ -328,6 +328,9 @@ def parse_hall(html: str, url: str) -> Optional[dict]:
         "phone": theater.get("telephone"),
         "lat": lat,
         "lng": lng,
+        # athinorama renders a "summerRoom.png" icon next to open-air screens;
+        # its presence means this venue offers open-air (θερινό) screenings.
+        "is_summer": "summerRoom.png" in html,
         "source_url": url,
         "screenings": screenings,
     }
@@ -347,6 +350,7 @@ def upsert_cinema(db: Session, data: dict) -> models.Cinema:
         cinema.lat = data["lat"]
     if data.get("lng") is not None:
         cinema.lng = data["lng"]
+    cinema.is_summer = bool(data.get("is_summer"))
     cinema.source_url = data.get("source_url")
     db.flush()
     return cinema

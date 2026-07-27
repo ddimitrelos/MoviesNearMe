@@ -3,6 +3,7 @@ from sqlalchemy import (
     Integer,
     String,
     Float,
+    Boolean,
     ForeignKey,
     DateTime,
     UniqueConstraint,
@@ -24,6 +25,7 @@ class Cinema(Base):
     lat = Column(Float)
     lng = Column(Float)
     region = Column(String)
+    is_summer = Column(Boolean, default=False, nullable=False)
     source_url = Column(String)
 
     screenings = relationship(

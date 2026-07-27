@@ -64,9 +64,12 @@ fun OsmMap(
                     title = cinema.name
                     snippet = cinema.address ?: ""
                     val highlighted = cinema.id == selectedCinemaId
-                    icon = pinDrawable(
-                        if (highlighted) 0xFFFFC107.toInt() else 0xFFE50914.toInt()
-                    )
+                    val color = when {
+                        highlighted -> 0xFFFFC107.toInt()          // gold = selected
+                        cinema.isSummer -> 0xFF00BFA5.toInt()      // teal = open-air
+                        else -> 0xFFE50914.toInt()                 // red = indoor
+                    }
+                    icon = pinDrawable(color)
                     setOnMarkerClickListener { _, _ ->
                         onCinemaClick(cinema)
                         true

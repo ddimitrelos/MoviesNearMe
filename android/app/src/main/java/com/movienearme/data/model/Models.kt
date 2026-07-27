@@ -32,6 +32,7 @@ data class Cinema(
     val lat: Double? = null,
     val lng: Double? = null,
     val region: String? = null,
+    @Json(name = "is_summer") val isSummer: Boolean = false,
     @Json(name = "distance_km") val distanceKm: Double? = null,
     val screenings: List<ScreeningBrief> = emptyList(),
 )

@@ -9,7 +9,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -53,9 +55,13 @@ fun MainScreen(vm: MapViewModel) {
                 movies = state.movies,
                 selectedMovie = state.selectedMovie,
                 timeWindow = state.timeWindow,
+                summerOnly = state.summerOnly,
+                nearMe = state.nearMe,
                 resultCount = state.cinemas.size,
                 onMovieSelected = vm::selectMovie,
                 onTimeWindowSelected = vm::selectTimeWindow,
+                onToggleSummer = vm::toggleSummerOnly,
+                onToggleNearMe = vm::toggleNearMe,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
@@ -133,9 +139,13 @@ private fun FilterBar(
     movies: List<Movie>,
     selectedMovie: Movie?,
     timeWindow: TimeWindow,
+    summerOnly: Boolean,
+    nearMe: Boolean,
     resultCount: Int,
     onMovieSelected: (Movie?) -> Unit,
     onTimeWindowSelected: (TimeWindow) -> Unit,
+    onToggleSummer: () -> Unit,
+    onToggleNearMe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -159,9 +169,32 @@ private fun FilterBar(
                     )
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = summerOnly,
+                    onClick = onToggleSummer,
+                    label = { Text("Summer") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.WbSunny, contentDescription = null,
+                            modifier = Modifier.size(18.dp))
+                    },
+                )
+                FilterChip(
+                    selected = nearMe,
+                    onClick = onToggleNearMe,
+                    label = { Text("Near me") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.NearMe, contentDescription = null,
+                            modifier = Modifier.size(18.dp))
+                    },
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "$resultCount cinemas" +
+                    (if (summerOnly) " · summer" else "") +
+                    (if (nearMe) " · near me" else "") +
                     (selectedMovie?.let { " · ${it.title}" } ?: ""),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -222,7 +255,34 @@ private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
                 Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Color(0xFFE50914))
                 Spacer(Modifier.width(8.dp))
                 Column {
-                    Text(cinema.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(cinema.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        if (cinema.isSummer) {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = Color(0xFF00BFA5),
+                                shape = RoundedCornerShape(6.dp),
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.WbSunny, contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Text(
+                                        "Open-air",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     val sub = buildString {
                         cinema.address?.let { append(it) }
                         cinema.distanceKm?.let { append("  ·  %.1f km away".format(it)) }

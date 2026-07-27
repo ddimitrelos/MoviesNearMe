@@ -34,7 +34,11 @@ CINEMAS = [
          address="Λεωφ. Βουλιαγμένης 276, Άγ. Δημήτριος",
          phone="2118009000", lat=37.9375, lng=23.7440, region="Άγ. Δημήτριος"),
     dict(slug="cine-paris", name="Cine Paris", address="Κυδαθηναίων 22, Πλάκα",
-         phone="2103222071", lat=37.9725, lng=23.7300, region="Πλάκα"),
+         phone="2103222071", lat=37.9725, lng=23.7300, region="Πλάκα",
+         is_summer=True),
+    dict(slug="thiseion", name="Θησείον", address="Αποστόλου Παύλου 7, Θησείο",
+         phone="2103470980", lat=37.9741, lng=23.7196, region="Θησείο",
+         is_summer=True),
     dict(slug="cinobo-opera", name="Cinobo Όπερα", address="Ακαδημίας 57, Αθήνα",
          phone="2103622683", lat=37.9838, lng=23.7347, region="Κέντρο"),
 ]

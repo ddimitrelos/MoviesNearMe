@@ -25,6 +25,7 @@ class CinemaOut(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     region: Optional[str] = None
+    is_summer: bool = False
 
     class Config:
         from_attributes = True
