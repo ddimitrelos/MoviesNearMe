@@ -118,6 +118,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setNearMeOrigin(id: String?) {
+        // Choosing a POI as the origin means "show cinemas near here", so turn
+        // the Near me filter on automatically.
+        if (id != null) _state.value = _state.value.copy(nearMe = true)
         updateSettings(_state.value.settings.copy(nearMeOriginId = id))
     }
 
