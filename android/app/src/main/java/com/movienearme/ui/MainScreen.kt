@@ -80,6 +80,30 @@ fun MainScreen(vm: MapViewModel) {
                 }
             }
 
+            state.loadingMessage?.let { msg ->
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = 6.dp,
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                        Text(msg, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    }
+                }
+            }
+
             state.error?.let { msg ->
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,

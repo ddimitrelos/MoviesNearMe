@@ -6,6 +6,7 @@ import com.movienearme.data.api.ApiClient
 import com.movienearme.data.model.Cinema
 import com.movienearme.data.model.Movie
 import com.movienearme.location.LatLng
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,7 @@ enum class TimeWindow(val label: String, val hours: Double?) {
 
 data class MapUiState(
     val loading: Boolean = false,
+    val loadingMessage: String? = null,
     val error: String? = null,
     val movies: List<Movie> = emptyList(),
     val cinemas: List<Cinema> = emptyList(),
@@ -71,20 +73,41 @@ class MapViewModel : ViewModel() {
         val s = _state.value
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
-            try {
-                val cinemas = api.getCinemas(
-                    movieId = s.selectedMovie?.id,
-                    withinHours = s.timeWindow.hours,
-                    lat = s.userLocation?.lat,
-                    lng = s.userLocation?.lng,
-                )
-                _state.value = _state.value.copy(loading = false, cinemas = cinemas)
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(loading = false, error = friendly(e))
+            // The cloud backend may be asleep (free tier) and take up to ~50s to
+            // wake. Retry a few times with backoff, showing a friendly message,
+            // before giving up.
+            var lastError: Exception? = null
+            val attempts = 5
+            for (attempt in 0 until attempts) {
+                try {
+                    val cinemas = api.getCinemas(
+                        movieId = s.selectedMovie?.id,
+                        withinHours = s.timeWindow.hours,
+                        lat = s.userLocation?.lat,
+                        lng = s.userLocation?.lng,
+                    )
+                    _state.value = _state.value.copy(
+                        loading = false, loadingMessage = null,
+                        error = null, cinemas = cinemas,
+                    )
+                    return@launch
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < attempts - 1) {
+                        _state.value = _state.value.copy(
+                            loadingMessage = "Waking up the server…",
+                        )
+                        delay(6000L)
+                    }
+                }
             }
+            _state.value = _state.value.copy(
+                loading = false, loadingMessage = null, error = friendly(lastError),
+            )
         }
     }
 
-    private fun friendly(e: Exception): String =
-        "Can't reach the server. Is the backend running? (${e.message})"
+    private fun friendly(e: Exception?): String =
+        "Can't reach the server. Check your connection and tap refresh. " +
+            "(${e?.message ?: "unknown error"})"
 }

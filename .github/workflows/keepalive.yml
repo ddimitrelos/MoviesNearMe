@@ -1,0 +1,19 @@
+name: keep-alive
+
+# Pings the Render backend so the free instance doesn't sleep (Render spins
+# a free service down after ~15 min idle). Runs every 10 minutes.
+# Note: GitHub disables scheduled workflows after 60 days with no repo commits,
+# and cron timing can drift a few minutes under load.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          curl -fsS --max-time 90 https://movienearme.onrender.com/health || true

@@ -15,10 +15,13 @@ object ApiClient {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         }
+        // Generous timeouts: a sleeping free-tier server can take ~30-50s to
+        // wake on the first request (cold start).
         val client = OkHttpClient.Builder()
             .addInterceptor(logging)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(70, TimeUnit.SECONDS)
             .build()
 
         val moshi = Moshi.Builder()
