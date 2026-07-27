@@ -11,6 +11,7 @@ import com.movienearme.data.model.Cinema
 import com.movienearme.data.model.Movie
 import com.movienearme.location.LatLng
 import java.util.UUID
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +52,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(MapUiState(settings = store.load()))
     val state: StateFlow<MapUiState> = _state.asStateFlow()
+
+    // The in-flight cinemas request, cancelled when a newer one starts so a slow
+    // stale response can't overwrite the latest filters.
+    private var refreshJob: Job? = null
 
     fun setUserLocation(loc: LatLng) {
         _state.value = _state.value.copy(userLocation = loc)
@@ -142,7 +147,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         // Also refresh the movie list, so a manual refresh heals a dropdown that
         // was loaded during a cold start (seed data).
         loadMovies()
-        viewModelScope.launch {
+        // Cancel any in-flight request so its (stale) result can't win a race.
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = false)
             // The cloud backend may be asleep (free tier) and take up to ~50s to
             // wake. Retry a few times with backoff, showing a friendly message,
