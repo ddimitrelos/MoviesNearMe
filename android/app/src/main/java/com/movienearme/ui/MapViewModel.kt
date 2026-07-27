@@ -51,11 +51,16 @@ class MapViewModel : ViewModel() {
 
     fun loadMovies() {
         viewModelScope.launch {
-            try {
-                val movies = api.getMovies()
-                _state.value = _state.value.copy(movies = movies)
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(error = friendly(e))
+            // Retry through a cold start so the dropdown gets the real list, not
+            // the seed fallback that a sleeping server briefly returns.
+            repeat(5) { attempt ->
+                try {
+                    val movies = api.getMovies()
+                    _state.value = _state.value.copy(movies = movies)
+                    return@launch
+                } catch (e: Exception) {
+                    if (attempt < 4) delay(6000L)
+                }
             }
         }
     }
@@ -86,6 +91,9 @@ class MapViewModel : ViewModel() {
 
     fun refresh() {
         val s = _state.value
+        // Also refresh the movie list, so a manual refresh heals a dropdown that
+        // was loaded during a cold start (seed data).
+        loadMovies()
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             // The cloud backend may be asleep (free tier) and take up to ~50s to
