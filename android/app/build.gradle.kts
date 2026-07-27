@@ -16,9 +16,12 @@ android {
         versionName = "1.0"
 
         // Where the app finds the backend.
-        // Android emulator -> host machine is 10.0.2.2.
-        // Physical device -> put your laptop's LAN IP here.
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000/\"")
+        //   Android emulator     -> 10.0.2.2 (alias for the host's localhost)
+        //   Physical device      -> your laptop's LAN IP, same Wi-Fi
+        // Override at build time:  ./gradlew assembleDebug -PapiBaseUrl=http://192.168.1.78:8000/
+        val apiBaseUrl = (project.findProperty("apiBaseUrl") as String?)
+            ?: "http://10.0.2.2:8000/"
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
     buildTypes {
