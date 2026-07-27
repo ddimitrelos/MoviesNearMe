@@ -57,12 +57,17 @@ jobs:
           script: |
             chmod +x gradlew
             adb logcat -c || true
-            ./gradlew connectedDebugAndroidTest
+            # Launch the app first and grab a screenshot, so we always have one
+            # even if the gated tests below fail.
+            ./gradlew :app:installDebug
+            adb shell pm grant com.movienearme android.permission.ACCESS_FINE_LOCATION || true
             adb emu geo fix 23.7348 37.9755 || true
             adb shell am start -n com.movienearme/.MainActivity || true
             sleep 25
             adb exec-out screencap -p > app-screenshot.png
             adb logcat -d > logcat.txt
+            # Now the gated UI + unit-on-device tests.
+            ./gradlew connectedDebugAndroidTest
       - name: Upload artifacts (screenshot, logcat, reports)
         if: always()
         uses: actions/upload-artifact@v4

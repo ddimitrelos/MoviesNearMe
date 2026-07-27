@@ -1,7 +1,6 @@
 package com.movienearme
 
 import android.Manifest
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -13,8 +12,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Instrumented UI tests that run on the emulator. They only assert on static
- * UI chrome (which renders immediately), so they don't depend on the backend.
+ * Instrumented UI tests that run on the emulator. They only assert on static UI
+ * chrome (which composes immediately), so they don't depend on the backend.
+ * assertExists() is used rather than assertIsDisplayed() because chips/settings
+ * rows may be off-screen in scrollable containers while still composed.
  */
 @RunWith(AndroidJUnit4::class)
 class MainScreenUiTest {
@@ -28,17 +29,17 @@ class MainScreenUiTest {
     val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun filterBar_showsTimeChips() {
-        // "Today" is the default-selected time chip and needs no network.
-        compose.onNodeWithText("Today").assertIsDisplayed()
-        compose.onNodeWithText("Summer").assertIsDisplayed()
-        compose.onNodeWithText("Near me").assertIsDisplayed()
+    fun filterBar_rendersChips() {
+        compose.onNodeWithText("Any time").assertExists()
+        compose.onNodeWithText("Summer").assertExists()
+        compose.onNodeWithText("Near me").assertExists()
     }
 
     @Test
-    fun settings_openFromGear_showsLanguageSection() {
+    fun settings_openFromGear_showsSections() {
         compose.onNodeWithContentDescription("Open settings").performClick()
-        compose.onNodeWithText("Language").assertIsDisplayed()
-        compose.onNodeWithText("Points of interest").assertIsDisplayed()
+        compose.waitForIdle()
+        compose.onNodeWithText("Language").assertExists()
+        compose.onNodeWithText("Points of interest").assertExists()
     }
 }
