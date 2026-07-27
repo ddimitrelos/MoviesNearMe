@@ -1,5 +1,8 @@
 package com.movienearme.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -7,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NearMe
@@ -18,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -244,6 +249,7 @@ private fun MovieDropdown(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -292,6 +298,19 @@ private fun CinemaSheet(cinema: Cinema, onDismiss: () -> Unit) {
                     }
                 }
             }
+
+            if (cinema.lat != null && cinema.lng != null) {
+                Spacer(Modifier.height(14.dp))
+                FilledTonalButton(
+                    onClick = { openDirections(context, cinema) },
+                ) {
+                    Icon(Icons.Filled.Directions, contentDescription = null,
+                        modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Directions")
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
 
             if (cinema.screenings.isEmpty()) {
@@ -348,6 +367,32 @@ private fun MovieShowtimes(title: String, genre: String?, screenings: List<Scree
 }
 
 // --- helpers ---------------------------------------------------------------
+
+private fun openDirections(context: android.content.Context, cinema: Cinema) {
+    val lat = cinema.lat ?: return
+    val lng = cinema.lng ?: return
+    val label = Uri.encode(cinema.name)
+    // Universal Google Maps directions link: opens the Maps app if installed,
+    // otherwise the browser. Destination is the exact coordinates.
+    val url = "https://www.google.com/maps/dir/?api=1" +
+        "&destination=$lat,$lng&destination_place_id=&travelmode=driving" +
+        "&dir_action=navigate&destination_name=$label"
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        // Prefer the Google Maps app when present.
+        setPackage("com.google.android.apps.maps")
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        // Maps app not installed — retry without a forced package (browser).
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e2: Exception) {
+            Toast.makeText(context, "No app available to show directions",
+                Toast.LENGTH_SHORT).show()
+        }
+    }
+}
 
 private fun groupByMovie(screenings: List<ScreeningBrief>): List<Pair<Movie, List<ScreeningBrief>>> =
     screenings
