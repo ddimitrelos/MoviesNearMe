@@ -316,6 +316,8 @@ def parse_hall(html: str, url: str) -> Optional[dict]:
                 "movie_original": original,
                 "movie_duration": duration,
                 "movie_genre": info["genre"] if info else None,
+                "movie_poster": (ev.get("image") or "").strip() or None,
+                "movie_url": (movie.get("url") or "").strip() or None,
                 "hall": _match_room(info, start),
                 "start_time": start,
             }
@@ -368,6 +370,10 @@ def upsert_movie(db: Session, row: dict) -> models.Movie:
         movie.duration_min = row["movie_duration"]
     if row.get("movie_genre"):
         movie.genre = row["movie_genre"]
+    if row.get("movie_poster"):
+        movie.poster_url = row["movie_poster"]
+    if row.get("movie_url"):
+        movie.source_url = row["movie_url"]
     db.flush()
     return movie
 

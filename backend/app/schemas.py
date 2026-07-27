@@ -11,6 +11,7 @@ class MovieOut(BaseModel):
     genre: Optional[str] = None
     duration_min: Optional[int] = None
     poster_url: Optional[str] = None
+    source_url: Optional[str] = None  # athinorama movie page
 
     class Config:
         from_attributes = True
