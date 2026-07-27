@@ -19,3 +19,7 @@ Thumbs.db
 
 # Built app packages
 *.apk
+
+# Stray screenshots (e.g. saved from a phone into the project folder)
+Screenshot_*.jpg
+Screenshot_*.png
