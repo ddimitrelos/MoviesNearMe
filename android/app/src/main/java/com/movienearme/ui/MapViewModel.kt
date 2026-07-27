@@ -76,7 +76,8 @@ data class MapUiState(
     val summerOnly: Boolean = false,
     val nearMe: Boolean = false,
     val userLocation: LatLng? = null,
-    val selectedCinema: Cinema? = null,
+    val selectedCinema: Cinema? = null,   // shows the poster callout on the map
+    val detailCinema: Cinema? = null,     // shows the full showtimes sheet
     val settings: AppSettings = AppSettings(),
     val showSettings: Boolean = false,
     val showPoiPicker: Boolean = false,
@@ -137,6 +138,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectCinema(cinema: Cinema?) {
         _state.value = _state.value.copy(selectedCinema = cinema)
+    }
+
+    fun openDetails(cinema: Cinema?) {
+        _state.value = _state.value.copy(detailCinema = cinema)
     }
 
     fun openSettings(open: Boolean) {

@@ -9,19 +9,27 @@ import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.Point
 import android.preference.PreferenceManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.viewinterop.AndroidView
 import com.movienearme.data.Poi
 import com.movienearme.data.model.Cinema
 import com.movienearme.location.LatLng
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 
 @Composable
@@ -32,12 +40,29 @@ fun OsmMap(
     youAreHere: String,
     pois: List<Poi> = emptyList(),
     selectedOriginPoiId: String? = null,
+    anchorCinema: Cinema? = null,
+    onAnchorOffset: (IntOffset?) -> Unit = {},
+    onMapClick: () -> Unit = {},
     onCinemaClick: (Cinema) -> Unit,
     onPoiClick: (Poi) -> Unit = {},
     onUserLocationClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val anchorState = rememberUpdatedState(anchorCinema)
+    val onAnchorState = rememberUpdatedState(onAnchorOffset)
+    val onMapClickState = rememberUpdatedState(onMapClick)
+
+    // Projects the anchored cinema's location to a screen pixel offset (or null).
+    fun publishAnchor(map: MapView) {
+        val c = anchorState.value
+        if (c?.lat != null && c.lng != null) {
+            val p = map.projection.toPixels(GeoPoint(c.lat, c.lng), Point())
+            onAnchorState.value(IntOffset(p.x, p.y))
+        } else {
+            onAnchorState.value(null)
+        }
+    }
 
     val mapView = remember {
         Configuration.getInstance().load(
@@ -50,7 +75,20 @@ fun OsmMap(
             setMultiTouchControls(true)
             controller.setZoom(12.5)
             controller.setCenter(GeoPoint(37.9838, 23.7275)) // Athens
+            // Re-anchor the callout as the map pans/zooms.
+            addMapListener(object : MapListener {
+                override fun onScroll(event: ScrollEvent?): Boolean { publishAnchor(this@apply); return false }
+                override fun onZoom(event: ZoomEvent?): Boolean { publishAnchor(this@apply); return false }
+            })
         }
+    }
+
+    // A tap on the map background (not a marker) dismisses the callout.
+    val eventsOverlay = remember {
+        MapEventsOverlay(object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean { onMapClickState.value(); return false }
+            override fun longPressHelper(p: GeoPoint?): Boolean = false
+        })
     }
 
     AndroidView(
@@ -58,6 +96,8 @@ fun OsmMap(
         factory = { mapView },
         update = { map ->
             map.overlays.clear()
+            // Background-tap handler must be first and survives the clear above.
+            map.overlays.add(eventsOverlay)
 
             userLocation?.let {
                 val me = Marker(map).apply {
@@ -108,6 +148,8 @@ fun OsmMap(
                 map.overlays.add(marker)
             }
             map.invalidate()
+            // Update the callout anchor position for the current selection.
+            map.post { publishAnchor(map) }
         }
     )
 }

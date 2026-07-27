@@ -12,6 +12,7 @@ data class Movie(
     val genre: String? = null,
     @Json(name = "duration_min") val durationMin: Int? = null,
     @Json(name = "poster_url") val posterUrl: String? = null,
+    @Json(name = "source_url") val sourceUrl: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

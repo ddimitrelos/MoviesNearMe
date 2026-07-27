@@ -72,6 +72,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // Image loading (movie posters)
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
     // OpenStreetMap
     implementation("org.osmdroid:osmdroid-android:6.1.20")
 

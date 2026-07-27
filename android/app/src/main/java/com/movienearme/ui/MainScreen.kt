@@ -23,9 +23,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.movienearme.R
@@ -42,6 +46,10 @@ import java.util.Locale
 @Composable
 fun MainScreen(vm: MapViewModel) {
     val state by vm.state.collectAsState()
+    val context = LocalContext.current
+    val noAppMsg = stringResource(R.string.no_directions_app)
+    var calloutOffset by remember { mutableStateOf<IntOffset?>(null) }
+    val pinPx = with(LocalDensity.current) { 52.dp.roundToPx() }
 
     Box(Modifier.fillMaxSize()) {
     PullToRefreshBox(
@@ -57,11 +65,31 @@ fun MainScreen(vm: MapViewModel) {
                 youAreHere = stringResource(R.string.you_are_here),
                 pois = state.settings.pois,
                 selectedOriginPoiId = if (state.nearMe) state.settings.nearMeOriginId else null,
+                anchorCinema = state.selectedCinema,
+                onAnchorOffset = { calloutOffset = it },
+                onMapClick = { vm.selectCinema(null) },
                 onCinemaClick = { vm.selectCinema(it) },
                 onPoiClick = { vm.setNearMeOrigin(it.id) },
                 onUserLocationClick = { vm.setNearMeOrigin(null) },
                 modifier = Modifier.fillMaxSize(),
             )
+
+            // Fancy movie-poster callout anchored above the tapped cinema pin.
+            val callout = state.selectedCinema
+            val anchor = calloutOffset
+            if (callout != null && anchor != null) {
+                var sz by remember { mutableStateOf(IntSize.Zero) }
+                PosterCallout(
+                    cinema = callout,
+                    onPosterClick = { movie ->
+                        movie.sourceUrl?.let { openUrl(context, it, noAppMsg) }
+                    },
+                    onOpenDetails = { vm.openDetails(callout) },
+                    modifier = Modifier
+                        .onSizeChanged { sz = it }
+                        .offset { IntOffset(anchor.x - sz.width / 2, anchor.y - sz.height - pinPx) },
+                )
+            }
 
             FilterBar(
                 movies = state.movies,
@@ -143,8 +171,8 @@ fun MainScreen(vm: MapViewModel) {
         }
     }
 
-    state.selectedCinema?.let { cinema ->
-        CinemaSheet(cinema = cinema, onDismiss = { vm.selectCinema(null) })
+    state.detailCinema?.let { cinema ->
+        CinemaSheet(cinema = cinema, onDismiss = { vm.openDetails(null) })
     }
 
     if (state.showSettings) {
@@ -434,6 +462,14 @@ private fun MovieShowtimes(title: String, genre: String?, screenings: List<Scree
 }
 
 // --- helpers ---------------------------------------------------------------
+
+private fun openUrl(context: android.content.Context, url: String, errorMsg: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    } catch (e: Exception) {
+        Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+    }
+}
 
 private fun openDirections(context: android.content.Context, cinema: Cinema, noMapsMsg: String) {
     val lat = cinema.lat ?: return
