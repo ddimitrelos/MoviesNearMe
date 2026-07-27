@@ -4,11 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.movienearme.data.AppSettings
+import com.movienearme.data.Poi
 import com.movienearme.data.SettingsStore
 import com.movienearme.data.api.ApiClient
 import com.movienearme.data.model.Cinema
 import com.movienearme.data.model.Movie
 import com.movienearme.location.LatLng
+import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +41,7 @@ data class MapUiState(
     val selectedCinema: Cinema? = null,
     val settings: AppSettings = AppSettings(),
     val showSettings: Boolean = false,
+    val showPoiPicker: Boolean = false,
 )
 
 class MapViewModel(app: Application) : AndroidViewModel(app) {
@@ -98,6 +101,26 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(showSettings = open)
     }
 
+    fun openPoiPicker(open: Boolean) {
+        _state.value = _state.value.copy(showPoiPicker = open)
+    }
+
+    fun addPoi(label: String, lat: Double, lng: Double) {
+        val poi = Poi(id = UUID.randomUUID().toString(), label = label.trim(), lat = lat, lng = lng)
+        val s = _state.value.settings
+        updateSettings(s.copy(pois = s.pois + poi))
+    }
+
+    fun removePoi(id: String) {
+        val s = _state.value.settings
+        val newOrigin = if (s.nearMeOriginId == id) null else s.nearMeOriginId
+        updateSettings(s.copy(pois = s.pois.filterNot { it.id == id }, nearMeOriginId = newOrigin))
+    }
+
+    fun setNearMeOrigin(id: String?) {
+        updateSettings(_state.value.settings.copy(nearMeOriginId = id))
+    }
+
     fun updateSettings(settings: AppSettings) {
         store.save(settings)
         val prev = _state.value
@@ -121,14 +144,21 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             // The cloud backend may be asleep (free tier) and take up to ~50s to
             // wake. Retry a few times with backoff, showing a friendly message,
             // before giving up.
+            // "Near me" measures from the chosen POI origin if one is selected,
+            // otherwise from the user's GPS location.
+            val originPoi = s.settings.nearMeOriginId
+                ?.let { id -> s.settings.pois.find { it.id == id } }
+            val originLat = if (s.nearMe && originPoi != null) originPoi.lat else s.userLocation?.lat
+            val originLng = if (s.nearMe && originPoi != null) originPoi.lng else s.userLocation?.lng
+
             val attempts = 5
             for (attempt in 0 until attempts) {
                 try {
                     val cinemas = api.getCinemas(
                         movieId = s.selectedMovie?.id,
                         withinHours = s.timeFilter.hours(s.settings),
-                        lat = s.userLocation?.lat,
-                        lng = s.userLocation?.lng,
+                        lat = originLat,
+                        lng = originLng,
                         summerOnly = s.summerOnly,
                         maxKm = if (s.nearMe) s.settings.nearMeKm.toDouble() else null,
                     )

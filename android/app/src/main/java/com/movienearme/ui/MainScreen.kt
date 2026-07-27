@@ -53,6 +53,7 @@ fun MainScreen(vm: MapViewModel) {
                 userLocation = state.userLocation,
                 selectedCinemaId = state.selectedCinema?.id,
                 youAreHere = stringResource(R.string.you_are_here),
+                pois = state.settings.pois,
                 onCinemaClick = { vm.selectCinema(it) },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -145,7 +146,18 @@ fun MainScreen(vm: MapViewModel) {
         SettingsSheet(
             settings = state.settings,
             onChange = vm::updateSettings,
+            onAddPoi = { vm.openPoiPicker(true) },
+            onRemovePoi = vm::removePoi,
+            onSetOrigin = vm::setNearMeOrigin,
             onDismiss = { vm.openSettings(false) },
+        )
+    }
+
+    if (state.showPoiPicker) {
+        PoiPicker(
+            initial = state.userLocation,
+            onAdd = { label, lat, lng -> vm.addPoi(label, lat, lng) },
+            onDismiss = { vm.openPoiPicker(false) },
         )
     }
 }

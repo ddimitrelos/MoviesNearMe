@@ -6,23 +6,30 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.movienearme.R
 import com.movienearme.data.AppSettings
+import com.movienearme.data.Poi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
     settings: AppSettings,
     onChange: (AppSettings) -> Unit,
+    onAddPoi: () -> Unit,
+    onRemovePoi: (String) -> Unit,
+    onSetOrigin: (String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -87,10 +94,56 @@ fun SettingsSheet(
                 onHoursChange = { onChange(settings.copy(filterBHours = it)) },
             )
 
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+
+            // --- "Near me" origin ---
+            SectionTitle(stringResource(R.string.near_me_from))
+            LanguageRow(stringResource(R.string.my_location), settings.nearMeOriginId == null) {
+                onSetOrigin(null)
+            }
+            settings.pois.forEach { poi ->
+                LanguageRow(poi.label, settings.nearMeOriginId == poi.id) {
+                    onSetOrigin(poi.id)
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+
+            // --- Points of interest ---
+            SectionTitle(stringResource(R.string.pois_section))
+            if (settings.pois.isEmpty()) {
+                Text(stringResource(R.string.no_pois), fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                settings.pois.forEach { poi -> PoiRow(poi, onRemovePoi) }
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onAddPoi, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.add_poi))
+            }
+
             Spacer(Modifier.height(20.dp))
             Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.close))
             }
+        }
+    }
+}
+
+@Composable
+private fun PoiRow(poi: Poi, onRemove: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Place, contentDescription = null, tint = Color(0xFF7C4DFF),
+            modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(poi.label, modifier = Modifier.weight(1f))
+        IconButton(onClick = { onRemove(poi.id) }) {
+            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_poi))
         }
     }
 }

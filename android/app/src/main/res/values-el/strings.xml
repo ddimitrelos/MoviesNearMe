@@ -41,4 +41,18 @@
     <string name="settings_show_filter">Εμφάνιση αυτού του φίλτρου</string>
     <string name="close">Κλείσιμο</string>
     <string name="open_settings">Άνοιγμα ρυθμίσεων</string>
+
+    <!-- Points of interest -->
+    <string name="pois_section">Σημεία ενδιαφέροντος</string>
+    <string name="add_poi">Προσθήκη σημείου</string>
+    <string name="no_pois">Δεν υπάρχουν σημεία ακόμη.</string>
+    <string name="poi_pick_hint">Μετακινήστε τον χάρτη ώστε η πινέζα να δείχνει το σημείο σας</string>
+    <string name="poi_save_here">Αποθήκευση σημείου</string>
+    <string name="poi_name_title">Ονομασία σημείου</string>
+    <string name="poi_label_hint">Ετικέτα (π.χ. Σπίτι, Δουλειά)</string>
+    <string name="save">Αποθήκευση</string>
+    <string name="cancel">Άκυρο</string>
+    <string name="delete_poi">Διαγραφή</string>
+    <string name="near_me_from">«Κοντά μου» από</string>
+    <string name="my_location">Η τοποθεσία μου</string>
 </resources>

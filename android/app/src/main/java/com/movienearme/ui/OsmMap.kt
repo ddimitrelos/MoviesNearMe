@@ -1,6 +1,13 @@
 package com.movienearme.ui
 
+import android.content.res.Resources
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.preference.PreferenceManager
 import androidx.compose.runtime.Composable
@@ -8,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import com.movienearme.data.Poi
 import com.movienearme.data.model.Cinema
 import com.movienearme.location.LatLng
 import org.osmdroid.config.Configuration
@@ -22,6 +30,7 @@ fun OsmMap(
     userLocation: LatLng?,
     selectedCinemaId: Int?,
     youAreHere: String,
+    pois: List<Poi> = emptyList(),
     onCinemaClick: (Cinema) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,6 +87,17 @@ fun OsmMap(
                 }
                 map.overlays.add(marker)
             }
+
+            // User points of interest (Home/Work…) — violet labeled chip.
+            pois.forEach { poi ->
+                val marker = Marker(map).apply {
+                    position = GeoPoint(poi.lat, poi.lng)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    icon = labelChipDrawable(context.resources, poi.label)
+                    title = poi.label
+                }
+                map.overlays.add(marker)
+            }
             map.invalidate()
         }
     )
@@ -98,3 +118,33 @@ private fun pinDrawable(color: Int): GradientDrawable =
         setStroke(6, Color.WHITE)
         setSize(52, 52)
     }
+
+/** A rounded violet chip with the POI label drawn in white — always visible on the map. */
+private fun labelChipDrawable(res: Resources, label: String): Drawable {
+    val d = res.displayMetrics.density
+    val padH = 10f * d
+    val padV = 6f * d
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 12f * d
+        typeface = Typeface.DEFAULT_BOLD
+    }
+    val fm = textPaint.fontMetrics
+    val textW = textPaint.measureText(label)
+    val textH = fm.descent - fm.ascent
+    val w = (textW + padH * 2).toInt().coerceAtLeast(1)
+    val h = (textH + padV * 2).toInt().coerceAtLeast(1)
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF7C4DFF.toInt() }
+    val r = h / 2f
+    canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r, r, bgPaint)
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * d
+        color = Color.WHITE
+    }
+    canvas.drawRoundRect(1f, 1f, w - 1f, h - 1f, r, r, strokePaint)
+    canvas.drawText(label, padH, padV - fm.ascent, textPaint)
+    return BitmapDrawable(res, bmp)
+}

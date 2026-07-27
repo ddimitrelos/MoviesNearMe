@@ -41,4 +41,18 @@
     <string name="settings_show_filter">Show this filter</string>
     <string name="close">Close</string>
     <string name="open_settings">Open settings</string>
+
+    <!-- Points of interest -->
+    <string name="pois_section">Points of interest</string>
+    <string name="add_poi">Add point of interest</string>
+    <string name="no_pois">No points of interest yet.</string>
+    <string name="poi_pick_hint">Move the map so the pin marks your spot</string>
+    <string name="poi_save_here">Save this spot</string>
+    <string name="poi_name_title">Name this place</string>
+    <string name="poi_label_hint">Label (e.g. Home, Work)</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete_poi">Delete</string>
+    <string name="near_me_from">\"Near me\" measured from</string>
+    <string name="my_location">My location</string>
 </resources>
