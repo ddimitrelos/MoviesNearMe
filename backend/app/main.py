@@ -30,10 +30,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from .database import Base, engine, get_db
+import threading
+
+from .database import Base, engine, get_db, SessionLocal
 from . import models, schemas, scraper, seed as seed_module
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("main")
 
 Base.metadata.create_all(bind=engine)
 
@@ -46,6 +49,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def bootstrap_data() -> None:
+    """
+    On a fresh (empty) database — e.g. a cloud instance with an ephemeral disk —
+    load the seed data instantly so the API is never empty, then scrape the real
+    Athinorama listings in a background thread so startup isn't blocked.
+    """
+    db = SessionLocal()
+    try:
+        count = db.query(func.count(models.Cinema.id)).scalar() or 0
+    finally:
+        db.close()
+    if count > 0:
+        return
+    log.info("empty database - loading seed data, then scraping in background")
+    try:
+        seed_module.seed()
+    except Exception as e:  # noqa: BLE001
+        log.warning("seed failed: %s", e)
+    threading.Thread(
+        target=scraper.run_scrape, kwargs={"wipe": True}, daemon=True
+    ).start()
 
 
 def haversine_km(lat1, lng1, lat2, lng2) -> float:
