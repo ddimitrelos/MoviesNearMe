@@ -83,6 +83,9 @@ fun OsmMap(
         }
     }
 
+    // Cache generated marker bitmaps (dot + name) so panning doesn't re-allocate.
+    val markerCache = remember { HashMap<String, MarkerArt>() }
+
     // A tap on the map background (not a marker) dismisses the callout.
     val eventsOverlay = remember {
         MapEventsOverlay(object : MapEventsReceiver {
@@ -113,18 +116,19 @@ fun OsmMap(
 
             cinemas.forEach { cinema ->
                 if (cinema.lat == null || cinema.lng == null) return@forEach
+                val color = when {
+                    cinema.id == selectedCinemaId -> 0xFFFFC107.toInt()  // gold = selected
+                    cinema.isSummer -> 0xFF00BFA5.toInt()                // teal = open-air
+                    else -> 0xFFE50914.toInt()                           // red = indoor
+                }
+                val art = cinemaMarkerArt(context.resources, color, cinema.name, markerCache)
                 val marker = Marker(map).apply {
                     position = GeoPoint(cinema.lat, cinema.lng)
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    // Anchor so the dot centre sits on the point; the name label
+                    // sits below and is part of the (large) tappable icon.
+                    setAnchor(Marker.ANCHOR_CENTER, art.anchorV)
                     title = cinema.name
-                    snippet = cinema.address ?: ""
-                    val highlighted = cinema.id == selectedCinemaId
-                    val color = when {
-                        highlighted -> 0xFFFFC107.toInt()          // gold = selected
-                        cinema.isSummer -> 0xFF00BFA5.toInt()      // teal = open-air
-                        else -> 0xFFE50914.toInt()                 // red = indoor
-                    }
-                    icon = pinDrawable(color)
+                    icon = art.drawable
                     setOnMarkerClickListener { _, _ ->
                         onCinemaClick(cinema)
                         true
@@ -169,6 +173,64 @@ private fun pinDrawable(color: Int): GradientDrawable =
         setStroke(6, Color.WHITE)
         setSize(52, 52)
     }
+
+/** A generated cinema marker (colored dot + name pill) plus its vertical anchor. */
+class MarkerArt(val drawable: Drawable, val anchorV: Float)
+
+private fun cinemaMarkerArt(
+    res: Resources,
+    color: Int,
+    name: String,
+    cache: HashMap<String, MarkerArt>,
+): MarkerArt = cache.getOrPut("$color|$name") { buildCinemaMarker(res, color, name) }
+
+private fun buildCinemaMarker(res: Resources, color: Int, name: String): MarkerArt {
+    val d = res.displayMetrics.density
+    val dot = 30f * d              // dot diameter (larger, easier to tap)
+    val stroke = 3f * d
+    val gap = 4f * d
+    val pad = 8f * d               // transparent padding enlarges the tap target
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = Color.WHITE
+        textSize = 11f * d
+        typeface = Typeface.DEFAULT_BOLD
+    }
+    val label = ellipsize(name, textPaint, 130f * d)
+    val fm = textPaint.fontMetrics
+    val textW = textPaint.measureText(label)
+    val textH = fm.descent - fm.ascent
+    val pillPadH = 6f * d
+    val pillPadV = 3f * d
+    val pillW = textW + pillPadH * 2
+    val pillH = textH + pillPadV * 2
+    val contentW = maxOf(dot, pillW)
+    val w = (contentW + pad * 2).toInt().coerceAtLeast(1)
+    val h = (pad + dot + gap + pillH + pad).toInt().coerceAtLeast(1)
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val cv = Canvas(bmp)
+    val cx = w / 2f
+    val dotCy = pad + dot / 2f
+    cv.drawCircle(cx, dotCy, dot / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+    cv.drawCircle(cx, dotCy, dot / 2f - stroke / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = stroke; this.color = Color.WHITE
+    })
+    val pillTop = pad + dot + gap
+    val pillLeft = cx - pillW / 2f
+    val r = pillH / 2f
+    cv.drawRoundRect(pillLeft, pillTop, pillLeft + pillW, pillTop + pillH, r, r,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0xCC101018.toInt() })
+    cv.drawText(label, cx - textW / 2f, pillTop + pillPadV - fm.ascent, textPaint)
+    return MarkerArt(BitmapDrawable(res, bmp), anchorV = dotCy / h)
+}
+
+/** Trim a label with an ellipsis so it fits within maxWidth px. */
+private fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
+    if (paint.measureText(text) <= maxWidth) return text
+    val ell = "…"
+    var end = text.length
+    while (end > 0 && paint.measureText(text.substring(0, end) + ell) > maxWidth) end--
+    return text.substring(0, end).trimEnd() + ell
+}
 
 /** A rounded chip with the POI label drawn in white — always visible on the map. */
 private fun labelChipDrawable(res: Resources, label: String, bgColor: Int): Drawable {
