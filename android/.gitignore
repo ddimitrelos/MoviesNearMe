@@ -5,3 +5,5 @@ local.properties
 *.iml
 .idea/
 .cxx/
+hs_err_pid*.log
+replay_pid*.log
