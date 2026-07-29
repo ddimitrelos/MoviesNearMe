@@ -4,11 +4,15 @@ import com.movienearme.data.AppSettings
 import com.movienearme.data.Poi
 import com.movienearme.data.model.Movie
 import com.movienearme.location.LatLng
+import com.movienearme.ui.INITIAL_ZOOM
+import com.movienearme.ui.LABEL_ZOOM
 import com.movienearme.ui.MapUiState
 import com.movienearme.ui.TimeFilter
 import com.movienearme.ui.selectingOrigin
+import com.movienearme.ui.shouldShowCinemaLabels
 import com.movienearme.ui.toCinemaQuery
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -83,6 +87,20 @@ class CinemaQueryTest {
         val q = after.toCinemaQuery()
         assertEquals(38.07, q.lat!!, 1e-6)   // Home, not GPS
         assertEquals(23.81, q.lng!!, 1e-6)
+    }
+
+    // --- Cinema name pills are gated on zoom to avoid overlap at overview zoom ---
+
+    @Test
+    fun labelsHidden_atInitialOverviewZoom() {
+        assertFalse("overview zoom should show plain dots", shouldShowCinemaLabels(INITIAL_ZOOM))
+    }
+
+    @Test
+    fun labelsShown_onceZoomedIn() {
+        assertTrue(shouldShowCinemaLabels(LABEL_ZOOM))
+        assertTrue(shouldShowCinemaLabels(LABEL_ZOOM + 2))
+        assertFalse(shouldShowCinemaLabels(LABEL_ZOOM - 0.5))
     }
 
     @Test

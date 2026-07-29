@@ -12,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.Point
 import android.preference.PreferenceManager
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -49,6 +50,9 @@ fun OsmMap(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    // Cinema name pills only render once zoomed in past a threshold; at overview
+    // zoom the 100+ labels overlap into an unreadable pile, so show plain dots.
+    val showLabelsState = remember { mutableStateOf(shouldShowCinemaLabels(INITIAL_ZOOM)) }
     val anchorState = rememberUpdatedState(anchorCinema)
     val onAnchorState = rememberUpdatedState(onAnchorOffset)
     val onMapClickState = rememberUpdatedState(onMapClick)
@@ -73,12 +77,15 @@ fun OsmMap(
         MapView(context).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
-            controller.setZoom(12.5)
+            controller.setZoom(INITIAL_ZOOM)
             controller.setCenter(GeoPoint(37.9838, 23.7275)) // Athens
-            // Re-anchor the callout as the map pans/zooms.
+            // Re-anchor the callout as the map pans/zooms; toggle name pills by zoom.
             addMapListener(object : MapListener {
                 override fun onScroll(event: ScrollEvent?): Boolean { publishAnchor(this@apply); return false }
-                override fun onZoom(event: ZoomEvent?): Boolean { publishAnchor(this@apply); return false }
+                override fun onZoom(event: ZoomEvent?): Boolean {
+                    showLabelsState.value = shouldShowCinemaLabels(this@apply.zoomLevelDouble)
+                    publishAnchor(this@apply); return false
+                }
             })
         }
     }
@@ -98,6 +105,7 @@ fun OsmMap(
         modifier = modifier,
         factory = { mapView },
         update = { map ->
+            val showLabels = showLabelsState.value
             map.overlays.clear()
             // Background-tap handler must be first and survives the clear above.
             map.overlays.add(eventsOverlay)
@@ -121,7 +129,7 @@ fun OsmMap(
                     cinema.isSummer -> 0xFF00BFA5.toInt()                // teal = open-air
                     else -> 0xFFE50914.toInt()                           // red = indoor
                 }
-                val art = cinemaMarkerArt(context.resources, color, cinema.name, markerCache)
+                val art = cinemaMarkerArt(context.resources, color, cinema.name, showLabels, markerCache)
                 val marker = Marker(map).apply {
                     position = GeoPoint(cinema.lat, cinema.lng)
                     // Anchor so the dot centre sits on the point; the name label
@@ -158,6 +166,15 @@ fun OsmMap(
     )
 }
 
+/** Default map zoom (whole Athens basin). */
+const val INITIAL_ZOOM = 12.5
+
+/** Below this zoom the map shows plain dots; at or above it, dots gain name pills. */
+const val LABEL_ZOOM = 14.0
+
+/** Whether cinema name pills should render at the given zoom level. */
+fun shouldShowCinemaLabels(zoom: Double): Boolean = zoom >= LABEL_ZOOM
+
 private fun dotDrawable(color: Int): GradientDrawable =
     GradientDrawable().apply {
         shape = GradientDrawable.OVAL
@@ -181,15 +198,17 @@ private fun cinemaMarkerArt(
     res: Resources,
     color: Int,
     name: String,
+    showLabel: Boolean,
     cache: HashMap<String, MarkerArt>,
-): MarkerArt = cache.getOrPut("$color|$name") { buildCinemaMarker(res, color, name) }
+): MarkerArt = cache.getOrPut("$color|$showLabel|$name") { buildCinemaMarker(res, color, name, showLabel) }
 
-private fun buildCinemaMarker(res: Resources, color: Int, name: String): MarkerArt {
+private fun buildCinemaMarker(res: Resources, color: Int, name: String, showLabel: Boolean): MarkerArt {
     val d = res.displayMetrics.density
     val dot = 30f * d              // dot diameter (larger, easier to tap)
     val stroke = 3f * d
     val gap = 4f * d
     val pad = 8f * d               // transparent padding enlarges the tap target
+    if (!showLabel) return buildDotMarker(res, color, dot, stroke, pad)
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.color = Color.WHITE
         textSize = 11f * d
@@ -221,6 +240,19 @@ private fun buildCinemaMarker(res: Resources, color: Int, name: String): MarkerA
         Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0xCC101018.toInt() })
     cv.drawText(label, cx - textW / 2f, pillTop + pillPadV - fm.ascent, textPaint)
     return MarkerArt(BitmapDrawable(res, bmp), anchorV = dotCy / h)
+}
+
+/** A label-less dot with transparent padding preserving the large tap target. */
+private fun buildDotMarker(res: Resources, color: Int, dot: Float, stroke: Float, pad: Float): MarkerArt {
+    val size = (dot + pad * 2).toInt().coerceAtLeast(1)
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val cv = Canvas(bmp)
+    val c = size / 2f
+    cv.drawCircle(c, c, dot / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+    cv.drawCircle(c, c, dot / 2f - stroke / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = stroke; this.color = Color.WHITE
+    })
+    return MarkerArt(BitmapDrawable(res, bmp), anchorV = 0.5f)
 }
 
 /** Trim a label with an ellipsis so it fits within maxWidth px. */
