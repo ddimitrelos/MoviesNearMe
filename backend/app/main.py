@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+import time
 import threading
 
 from .database import Base, engine, get_db, SessionLocal
@@ -51,28 +52,43 @@ app.add_middleware(
 )
 
 
+def _daily_scrape_loop() -> None:
+    """Re-scrape Athinorama every 24 h so listings never go stale."""
+    while True:
+        time.sleep(24 * 60 * 60)
+        try:
+            log.info("daily scrape starting")
+            scraper.run_scrape(wipe=True)
+        except Exception as e:  # noqa: BLE001
+            log.warning("daily scrape failed: %s", e)
+
+
 @app.on_event("startup")
 def bootstrap_data() -> None:
     """
     On a fresh (empty) database — e.g. a cloud instance with an ephemeral disk —
     load the seed data instantly so the API is never empty, then scrape the real
     Athinorama listings in a background thread so startup isn't blocked.
+
+    A daily re-scrape loop is always started so listings stay current even when
+    the DB already had data (i.e. the service restarted without a wipe).
     """
     db = SessionLocal()
     try:
         count = db.query(func.count(models.Cinema.id)).scalar() or 0
     finally:
         db.close()
-    if count > 0:
-        return
-    log.info("empty database - loading seed data, then scraping in background")
-    try:
-        seed_module.seed()
-    except Exception as e:  # noqa: BLE001
-        log.warning("seed failed: %s", e)
-    threading.Thread(
-        target=scraper.run_scrape, kwargs={"wipe": True}, daemon=True
-    ).start()
+    if count == 0:
+        log.info("empty database - loading seed data, then scraping in background")
+        try:
+            seed_module.seed()
+        except Exception as e:  # noqa: BLE001
+            log.warning("seed failed: %s", e)
+        threading.Thread(
+            target=scraper.run_scrape, kwargs={"wipe": True}, daemon=True
+        ).start()
+
+    threading.Thread(target=_daily_scrape_loop, daemon=True).start()
 
 
 def haversine_km(lat1, lng1, lat2, lng2) -> float:
