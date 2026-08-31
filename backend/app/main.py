@@ -79,14 +79,18 @@ def bootstrap_data() -> None:
     finally:
         db.close()
     if count == 0:
-        log.info("empty database - loading seed data, then scraping in background")
+        log.info("empty database - loading seed data")
         try:
             seed_module.seed()
         except Exception as e:  # noqa: BLE001
             log.warning("seed failed: %s", e)
-        threading.Thread(
-            target=scraper.run_scrape, kwargs={"wipe": True}, daemon=True
-        ).start()
+
+    # Always scrape on startup so data is fresh after a restart/redeploy
+    # (Render's free tier has an ephemeral disk — the SQLite file is gone after
+    # every deploy, so seed data would otherwise linger until the daily loop fires).
+    threading.Thread(
+        target=scraper.run_scrape, kwargs={"wipe": True}, daemon=True
+    ).start()
 
     threading.Thread(target=_daily_scrape_loop, daemon=True).start()
 
