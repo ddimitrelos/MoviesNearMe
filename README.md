@@ -16,8 +16,9 @@ athinorama.gr is painful.
 
 - **`backend/`** — Python + FastAPI. Scrapes athinorama cinema-hall pages
   (name, address, coordinates, showtimes) into SQLite and serves a REST API.
-  Ships with a **seed dataset of real Athens cinemas** so the app works
-  immediately.
+  Ships with a **committed snapshot of real listings** (refreshed daily by CI)
+  so even a freshly restarted instance serves real cinemas immediately — see
+  [Data freshness](#data-freshness).
 - **`android/`** — Native Kotlin app (Jetpack Compose). Map with cinema pins,
   GPS auto-location (defaults to Athens), filter by movie, filter by time
   window, and a bottom sheet of showtimes per cinema. Uses **OpenStreetMap**
@@ -36,10 +37,9 @@ python -m venv .venv
 # Git Bash:            source .venv/Scripts/activate
 pip install -r requirements.txt
 
-# Load the sample Athens cinemas + a few days of showtimes:
-python -m app.seed
-
-# Start the API on 0.0.0.0:8000 so the emulator/device can reach it:
+# Start the API on 0.0.0.0:8000 so the emulator/device can reach it.
+# On first run it loads the committed snapshot of real listings, then scrapes
+# athinorama in the background — no manual data step needed.
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -54,17 +54,17 @@ movie / screening counts. Interactive API docs are at
 | `GET /movies?query=` | Movies currently showing (optional title search) |
 | `GET /cinemas?movie_id=&within_hours=&lat=&lng=` | Cinemas with the screenings matching the filters; sorted by distance and given a `distance_km` when `lat`/`lng` are supplied |
 | `GET /cinemas/{id}/screenings` | Full upcoming schedule for one cinema |
-| `POST /admin/seed` | Reload the sample data |
-| `POST /admin/scrape?limit=` | Trigger a live scrape of athinorama (background) |
+| `GET /health` | Counts, `status` (`ok`/`degraded`), last-scrape result, snapshot age, DB location |
+| `POST /admin/scrape?limit=&sync=` | Trigger a live scrape (background, or `sync=true` to wait for the summary) |
+| `POST /admin/seed` | Invented sample data — **local only**, needs `ALLOW_SEED=1` |
 
 ### Live data from athinorama.gr
 
-The seed data is there so you can develop without hammering the site. To pull
-real listings:
-
 ```bash
-# Scrape everything (be polite — there is a 1s delay per hall):
+# Scrape everything into the local DB (~30s; halls are fetched concurrently):
 python -m app.scraper
+# Rewrite the committed cold-start snapshot from a live scrape:
+python -m app.snapshot
 # or a quick sample of 5 halls:
 curl -X POST "http://localhost:8000/admin/scrape?limit=5"
 ```
@@ -75,6 +75,35 @@ plus one `ScreeningEvent` per showing (ISO `startDate`, and a nested `Movie`
 with Greek `name` + English `alternateName`). This is far more robust than
 scraping markup. A full run currently yields ~111 cinemas and ~3,000 screenings.
 Parsing is best-effort: a malformed JSON-LD block is skipped, never fatal.
+
+### Data freshness
+
+The app once showed only **11 cinemas** after a restart: Render's free tier has
+no persistent disk, so every restart began with an empty database, which the
+old startup code filled with `seed.py` — eleven invented cinemas — and served
+as if real while the (then ~2 minute, sequential) scrape ran. If that scrape
+failed, the next attempt was 24 hours away.
+
+Four rules now keep that from recurring:
+
+1. **Never serve invented data.** Startup loads
+   `app/data/cinemas_snapshot.json.gz` — the last real scrape, refreshed daily
+   by `.github/workflows/snapshot.yml`. `seed.py` is local-only (`ALLOW_SEED=1`).
+   A snapshot whose showtimes have all passed is skipped rather than loaded.
+2. **A bad scrape can't shrink the dataset.** `scraper.replace_decision` only
+   allows a wipe-and-replace when the run looks complete (≥30 halls, ≥60% of
+   those discovered, ≥70% of what's already stored). Anything less merges, and
+   past screenings are pruned so nothing stale accumulates. The write happens
+   in one transaction, so clients never see a half-populated database.
+3. **Self-healing refresh.** A supervisor thread re-scrapes whenever fewer than
+   30 cinemas have upcoming showtimes, the data is over 6 hours old, or the last
+   run failed (with backoff) — instead of sleeping for a day.
+4. **Failure is visible.** `/health` returns `status: "degraded"` whenever the
+   map would look thin, and reports the last scrape, snapshot age, and whether
+   the database is on a persistent disk. The keep-alive workflow fails on a
+   sustained `degraded`, so it surfaces instead of going unnoticed.
+
+Halls are fetched concurrently (6 workers), cutting a full refresh to ~30s.
 
 ---
 
@@ -147,7 +176,9 @@ MovieNearMe/
 │   │   ├── models.py      # SQLAlchemy: Cinema, Movie, Screening
 │   │   ├── schemas.py     # Pydantic response models
 │   │   ├── scraper.py     # athinorama.gr scraper (+ Greek date parsing)
-│   │   ├── seed.py        # real Athens cinemas + sample showtimes
+│   │   ├── snapshot.py    # cold-start dataset: read/write/refresh
+│   │   ├── data/          # cinemas_snapshot.json.gz (committed, daily refresh)
+│   │   ├── seed.py        # invented sample data — local development only
 │   │   └── database.py
 │   └── requirements.txt
 └── android/

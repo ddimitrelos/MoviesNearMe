@@ -14,14 +14,25 @@ Endpoints the Android app uses:
         lat,lng    : if given, results are sorted by distance and each cinema
                      gets a distance_km field
   GET /cinemas/{id}/screenings      -> full screening list for one cinema
-  POST /admin/scrape                -> trigger a live scrape (background)
-  POST /admin/seed                  -> load sample data
+  POST /admin/scrape                -> trigger a live scrape (background or ?sync)
+  POST /admin/seed                  -> sample data, local development only
+
+Data availability
+-----------------
+The service must never serve invented listings. On a cold start (Render's free
+tier loses the SQLite file on every restart) the database is filled from the
+committed snapshot of the last real scrape, then a live scrape refreshes it.
+A supervisor thread re-scrapes whenever the data is thin, stale, or overdue,
+and /health reports exactly which of those is true.
 """
 
 from __future__ import annotations
 
 import math
+import os
 import logging
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -30,18 +41,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-import time
-import threading
-
-from .database import Base, engine, get_db, SessionLocal
-from . import models, schemas, scraper, seed as seed_module
+from .database import Base, engine, get_db, SessionLocal, DB_PATH, DB_IS_PERSISTENT
+from . import models, schemas, scraper, snapshot, seed as seed_module
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="MovieNearMe API", version="1.0.0")
+# --- Data freshness policy ---------------------------------------------------
+# How often the supervisor wakes up to check the data.
+CHECK_INTERVAL_SECONDS = 300
+# A dataset older than this is refreshed even if it still looks healthy.
+REFRESH_AFTER_HOURS = 6
+# Fewer cinemas than this showing anything upcoming means something is wrong;
+# refresh immediately instead of waiting for the next daily window. The old
+# 24h sleep is why a bad scrape could leave production broken for a full day.
+MIN_HEALTHY_CINEMAS = 30
+# Wait between retries after consecutive failures (seconds), last value repeats.
+FAILURE_BACKOFF = (300, 900, 1800, 3600)
+
+# Only one scrape at a time: the supervisor and /admin/scrape share this.
+_scrape_lock = threading.Lock()
+
+app = FastAPI(title="MovieNearMe API", version="1.1.0")
 
 # The Android emulator reaches the host at 10.0.2.2; allow everything in dev.
 app.add_middleware(
@@ -52,47 +75,138 @@ app.add_middleware(
 )
 
 
-def _daily_scrape_loop() -> None:
-    """Re-scrape Athinorama every 24 h so listings never go stale."""
+# --- Data-state helpers ------------------------------------------------------
+
+def _data_state(db: Session, now: Optional[datetime] = None) -> dict:
+    now = now or datetime.now()
+    upcoming = db.query(models.Screening).filter(models.Screening.start_time >= now)
+    return {
+        "cinemas": db.query(func.count(models.Cinema.id)).scalar() or 0,
+        "movies": db.query(func.count(models.Movie.id)).scalar() or 0,
+        "screenings": db.query(func.count(models.Screening.id)).scalar() or 0,
+        "upcoming_screenings": upcoming.count(),
+        "cinemas_with_upcoming": upcoming.with_entities(
+            models.Screening.cinema_id
+        ).distinct().count(),
+    }
+
+
+def needs_scrape(state: dict, last: dict, now: Optional[datetime] = None) -> tuple:
+    """
+    Should we scrape right now? Returns (bool, reason).
+
+    Pure function of the data state and the last run, so the policy is testable
+    without a network or a clock.
+    """
+    now = now or datetime.now()
+    if state["cinemas_with_upcoming"] < MIN_HEALTHY_CINEMAS:
+        return True, "only %d cinemas have upcoming screenings" % (
+            state["cinemas_with_upcoming"],
+        )
+    finished = last.get("finished_at")
+    if not last.get("ok") or not finished:
+        return True, "no successful scrape yet"
+    try:
+        age = now - datetime.fromisoformat(finished)
+    except (TypeError, ValueError):
+        return True, "unknown last-scrape time"
+    if age >= timedelta(hours=REFRESH_AFTER_HOURS):
+        return True, "last scrape was %.1f h ago" % (age.total_seconds() / 3600.0)
+    return False, "data is fresh"
+
+
+def _backoff_seconds(consecutive_failures: int) -> int:
+    if consecutive_failures <= 0:
+        return 0
+    idx = min(consecutive_failures, len(FAILURE_BACKOFF)) - 1
+    return FAILURE_BACKOFF[idx]
+
+
+def scrape_now(wipe: bool = True) -> dict:
+    """Run a scrape unless one is already running."""
+    if not _scrape_lock.acquire(blocking=False):
+        return {"skipped": "a scrape is already running"}
+    try:
+        return scraper.run_scrape(wipe=wipe)
+    finally:
+        _scrape_lock.release()
+
+
+def _scrape_supervisor() -> None:
+    """
+    Keep the dataset current, and self-heal when it is not.
+
+    Replaces the old `sleep(24h)` loop, which meant a failed scrape left stale
+    or bootstrap data in place until the next day.
+    """
     while True:
-        time.sleep(24 * 60 * 60)
         try:
-            log.info("daily scrape starting")
-            scraper.run_scrape(wipe=True)
-        except Exception as e:  # noqa: BLE001
-            log.warning("daily scrape failed: %s", e)
+            db = SessionLocal()
+            try:
+                state = _data_state(db)
+            finally:
+                db.close()
+            last = scraper.last_run()
+            due, reason = needs_scrape(state, last)
+            if due:
+                wait = _backoff_seconds(last.get("consecutive_failures", 0))
+                finished = last.get("finished_at")
+                if wait and finished:
+                    try:
+                        since = (
+                            datetime.now() - datetime.fromisoformat(finished)
+                        ).total_seconds()
+                    except (TypeError, ValueError):
+                        since = wait
+                    if since < wait:
+                        time.sleep(CHECK_INTERVAL_SECONDS)
+                        continue
+                log.info("scrape due: %s", reason)
+                scrape_now()
+        except Exception as e:  # noqa: BLE001 - the supervisor must never die
+            log.warning("supervisor iteration failed: %s", e)
+        time.sleep(CHECK_INTERVAL_SECONDS)
 
 
 @app.on_event("startup")
 def bootstrap_data() -> None:
     """
-    On a fresh (empty) database — e.g. a cloud instance with an ephemeral disk —
-    load the seed data instantly so the API is never empty, then scrape the real
-    Athinorama listings in a background thread so startup isn't blocked.
+    Make sure the API is serving real listings from the very first request.
 
-    A daily re-scrape loop is always started so listings stay current even when
-    the DB already had data (i.e. the service restarted without a wipe).
+    On an empty or unusable database (a fresh cloud instance, or one whose data
+    is entirely in the past) load the committed snapshot of the last real
+    scrape. Never load the invented sample data here - showing eleven fake
+    cinemas is worse than showing none, because it looks like it worked.
     """
     db = SessionLocal()
     try:
-        count = db.query(func.count(models.Cinema.id)).scalar() or 0
+        state = _data_state(db)
+        if state["cinemas_with_upcoming"] < MIN_HEALTHY_CINEMAS:
+            log.info(
+                "bootstrap: only %d cinemas with upcoming screenings - "
+                "loading snapshot", state["cinemas_with_upcoming"],
+            )
+            try:
+                loaded = snapshot.load_into(db)
+                if not loaded:
+                    log.warning(
+                        "no usable snapshot; the API will be empty until the "
+                        "first scrape finishes"
+                    )
+            except Exception as e:  # noqa: BLE001 - never block startup
+                log.warning("snapshot load failed: %s", e)
     finally:
         db.close()
-    if count == 0:
-        log.info("empty database - loading seed data")
-        try:
-            seed_module.seed()
-        except Exception as e:  # noqa: BLE001
-            log.warning("seed failed: %s", e)
 
-    # Always scrape on startup so data is fresh after a restart/redeploy
-    # (Render's free tier has an ephemeral disk — the SQLite file is gone after
-    # every deploy, so seed data would otherwise linger until the daily loop fires).
-    threading.Thread(
-        target=scraper.run_scrape, kwargs={"wipe": True}, daemon=True
-    ).start()
+    if not DB_IS_PERSISTENT:
+        log.info(
+            "database at %s is not on a persistent disk - every restart "
+            "rebuilds it from the snapshot plus a fresh scrape", DB_PATH,
+        )
 
-    threading.Thread(target=_daily_scrape_loop, daemon=True).start()
+    # The supervisor scrapes immediately (no successful run recorded yet) and
+    # then keeps the data fresh.
+    threading.Thread(target=_scrape_supervisor, daemon=True).start()
 
 
 def haversine_km(lat1, lng1, lat2, lng2) -> float:
@@ -106,11 +220,28 @@ def haversine_km(lat1, lng1, lat2, lng2) -> float:
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
+    """
+    Health plus a full data-quality report.
+
+    The counts alone hid the original bug: the service answered "ok" while
+    serving eleven fake cinemas. `status` is now "degraded" whenever the map
+    would look empty, and the last-scrape block says why.
+    """
+    state = _data_state(db)
+    last = scraper.last_run()
+    degraded = state["cinemas_with_upcoming"] < MIN_HEALTHY_CINEMAS
     return {
-        "status": "ok",
-        "cinemas": db.query(func.count(models.Cinema.id)).scalar(),
-        "movies": db.query(func.count(models.Movie.id)).scalar(),
-        "screenings": db.query(func.count(models.Screening.id)).scalar(),
+        "status": "degraded" if degraded else "ok",
+        # legacy keys kept for the keep-alive ping and older clients
+        "cinemas": state["cinemas"],
+        "movies": state["movies"],
+        "screenings": state["screenings"],
+        "upcoming_screenings": state["upcoming_screenings"],
+        "cinemas_with_upcoming": state["cinemas_with_upcoming"],
+        "min_healthy_cinemas": MIN_HEALTHY_CINEMAS,
+        "last_scrape": last,
+        "snapshot": snapshot.info(),
+        "db": {"path": DB_PATH, "persistent": DB_IS_PERSISTENT},
     }
 
 
@@ -239,12 +370,29 @@ def cinema_screenings(
 
 
 @app.post("/admin/scrape")
-def trigger_scrape(background: BackgroundTasks, limit: Optional[int] = None):
+def trigger_scrape(
+    background: BackgroundTasks,
+    limit: Optional[int] = None,
+    sync: bool = False,
+):
+    if sync:
+        return scraper.run_scrape(limit)
     background.add_task(scraper.run_scrape, limit)
     return {"status": "scrape started", "limit": limit}
 
 
 @app.post("/admin/seed")
 def trigger_seed():
+    """
+    Load the invented sample dataset.
+
+    Disabled unless ALLOW_SEED=1. This data must never reach production: eleven
+    fake cinemas served as if real is the exact failure this codebase had.
+    """
+    if os.getenv("ALLOW_SEED") != "1":
+        raise HTTPException(
+            status_code=403,
+            detail="seeding is disabled; set ALLOW_SEED=1 for local development",
+        )
     seed_module.seed()
     return {"status": "seeded"}

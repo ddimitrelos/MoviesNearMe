@@ -22,6 +22,8 @@ import re
 import json
 import time
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
@@ -46,8 +48,21 @@ HEADERS = {
     "Accept-Language": "el-GR,el;q=0.9,en;q=0.8",
 }
 
-# polite delay between hall requests (seconds)
-REQUEST_DELAY = 0.7
+# Hall pages are fetched concurrently. A sequential run with a long politeness
+# delay took ~2 minutes, and for that whole time the API kept serving whatever
+# was in the database before it. A small worker pool plus a per-request delay
+# keeps load on athinorama modest while cutting a full refresh to well under a
+# minute, which is what keeps the "stale data" window short.
+MAX_WORKERS = 6
+# polite delay each worker waits after a hall request (seconds)
+REQUEST_DELAY = 0.3
+
+# --- Safety rails for replacing the live dataset -----------------------------
+# A scrape may only wipe-and-replace the database when the run looks complete.
+# A partial run must degrade to a merge, never a shrink.
+MIN_HALLS_FOR_REPLACE = 30          # absolute floor
+REPLACE_RATIO_DISCOVERED = 0.6      # vs. hall URLs found on the landing pages
+REPLACE_RATIO_EXISTING = 0.7        # vs. cinemas already in the database
 
 LD_JSON_RE = re.compile(
     r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -358,10 +373,13 @@ def upsert_cinema(db: Session, data: dict) -> models.Cinema:
     return cinema
 
 
-def upsert_movie(db: Session, row: dict) -> models.Movie:
-    movie = db.query(models.Movie).filter_by(slug=row["movie_slug"]).one_or_none()
+def upsert_movie(db: Session, row: dict, cache: Optional[dict] = None) -> models.Movie:
+    slug = row["movie_slug"]
+    movie = cache.get(slug) if cache is not None else None
     if movie is None:
-        movie = models.Movie(slug=row["movie_slug"], title=row["movie_title"])
+        movie = db.query(models.Movie).filter_by(slug=slug).one_or_none()
+    if movie is None:
+        movie = models.Movie(slug=slug, title=row["movie_title"])
         db.add(movie)
     movie.title = row["movie_title"]
     if row.get("movie_original"):
@@ -375,25 +393,36 @@ def upsert_movie(db: Session, row: dict) -> models.Movie:
     if row.get("movie_url"):
         movie.source_url = row["movie_url"]
     db.flush()
+    if cache is not None:
+        cache[slug] = movie
     return movie
 
 
-def save_hall(db: Session, hall: dict) -> None:
+def save_hall(db: Session, hall: dict, cache: Optional[dict] = None,
+              *, table_is_empty: bool = False, commit: bool = True) -> int:
+    """Write one hall and its screenings. Returns the rows inserted."""
     cinema = upsert_cinema(db, hall)
+    written = 0
+    seen: set = set()
     for row in hall["screenings"]:
-        movie = upsert_movie(db, row)
-        exists = (
-            db.query(models.Screening)
-            .filter_by(
-                cinema_id=cinema.id,
-                movie_id=movie.id,
-                start_time=row["start_time"],
-                hall=row["hall"],
-            )
-            .first()
-        )
-        if exists:
+        movie = upsert_movie(db, row, cache)
+        key = (cinema.id, movie.id, row["start_time"], row["hall"])
+        if key in seen:
             continue
+        seen.add(key)
+        if not table_is_empty:
+            exists = (
+                db.query(models.Screening)
+                .filter_by(
+                    cinema_id=cinema.id,
+                    movie_id=movie.id,
+                    start_time=row["start_time"],
+                    hall=row["hall"],
+                )
+                .first()
+            )
+            if exists:
+                continue
         db.add(
             models.Screening(
                 cinema_id=cinema.id,
@@ -402,56 +431,184 @@ def save_hall(db: Session, hall: dict) -> None:
                 hall=row["hall"],
             )
         )
+        written += 1
+    if commit:
+        db.commit()
+    return written
+
+
+def prune_past_screenings(db: Session, before: Optional[datetime] = None) -> int:
+    """
+    Drop screenings that already happened.
+
+    Only the replace path clears the table wholesale, so without this the merge
+    path used by partial runs accumulates dead showtimes forever.
+    """
+    cutoff = before or datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    deleted = (
+        db.query(models.Screening)
+        .filter(models.Screening.start_time < cutoff)
+        .delete(synchronize_session=False)
+    )
+    return int(deleted or 0)
+
+
+def replace_decision(parsed: int, discovered: int, existing: int) -> tuple:
+    """
+    Decide whether a scrape result is allowed to replace the whole dataset.
+
+    Returns (may_replace, reason). A refusal is not an error - the caller merges
+    the partial result instead, so the API keeps serving a full listing.
+    """
+    if parsed <= 0:
+        return False, "no halls parsed"
+    if parsed < MIN_HALLS_FOR_REPLACE:
+        return False, "only %d halls, floor is %d" % (parsed, MIN_HALLS_FOR_REPLACE)
+    if discovered and parsed < discovered * REPLACE_RATIO_DISCOVERED:
+        return False, "partial run (%d/%d halls)" % (parsed, discovered)
+    if existing and parsed < existing * REPLACE_RATIO_EXISTING:
+        return False, "would shrink dataset (%d halls vs %d cinemas)" % (
+            parsed, existing,
+        )
+    return True, "complete run"
+
+
+def publish(db: Session, halls: list, *, replace: bool) -> int:
+    """
+    Write `halls` in a single transaction.
+
+    Nothing is committed until every hall is written, so readers see either the
+    old dataset or the new one - never a half-populated database.
+    """
+    if replace:
+        db.query(models.Screening).delete(synchronize_session=False)
+        db.query(models.Movie).delete(synchronize_session=False)
+        db.query(models.Cinema).delete(synchronize_session=False)
+        db.flush()
+    cache: dict = {}
+    written = 0
+    for hall in halls:
+        written += save_hall(db, hall, cache, table_is_empty=replace, commit=False)
+    if not replace:
+        prune_past_screenings(db)
     db.commit()
+    return written
+
+
+# --- Scraping ---------------------------------------------------------------
+
+def _fetch_and_parse(client: httpx.Client, url: str) -> Optional[dict]:
+    html = fetch(client, url)
+    if not html:
+        return None
+    hall = parse_hall(html, url)
+    time.sleep(REQUEST_DELAY)
+    if not hall or not hall["name"]:
+        return None
+    return hall
+
+
+def scrape_halls(limit: Optional[int] = None) -> tuple:
+    """Fetch and parse every hall concurrently -> (halls, discovered, errors)."""
+    with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
+        urls = discover_hall_urls(client)
+        log.info("discovered %d hall urls", len(urls))
+        discovered = len(urls)
+        if limit:
+            urls = urls[:limit]
+        if not urls:
+            return [], discovered, 0
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            results = list(pool.map(lambda u: _fetch_and_parse(client, u), urls))
+    halls = [h for h in results if h]
+    # When a limit is set, judge completeness against the limited set.
+    expected = len(urls) if limit else discovered
+    return halls, expected, len(results) - len(halls)
+
+
+# --- Run status (surfaced on /health) ---------------------------------------
+
+_status_lock = threading.Lock()
+LAST_RUN: dict = {
+    "started_at": None,
+    "finished_at": None,
+    "ok": None,
+    "halls": 0,
+    "discovered": 0,
+    "screenings": 0,
+    "errors": 0,
+    "replaced": None,
+    "reason": None,
+    "consecutive_failures": 0,
+}
+
+
+def last_run() -> dict:
+    with _status_lock:
+        return dict(LAST_RUN)
+
+
+def _record(**fields) -> None:
+    with _status_lock:
+        LAST_RUN.update(fields)
 
 
 def run_scrape(limit: Optional[int] = None, wipe: bool = True) -> dict:
     """
     Scrape all halls into the database. Returns a small summary dict.
 
-    Halls are parsed into memory first; the destructive wipe only runs if the
-    scrape mostly succeeded, so a flaky-network run can never blow away good
-    data. On a partial run we upsert without wiping instead.
+    Halls are parsed into memory first and written in a single transaction. The
+    destructive replace only runs when `replace_decision` says the result looks
+    complete, so a flaky network can never shrink or empty production.
     """
-    summary = {"halls": 0, "screenings": 0, "errors": 0}
-    parsed: list[dict] = []
-    with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
-        urls = discover_hall_urls(client)
-        log.info("discovered %d hall urls", len(urls))
-        if limit:
-            urls = urls[:limit]
-        for url in urls:
-            html = fetch(client, url)
-            if not html:
-                summary["errors"] += 1
-                continue
-            hall = parse_hall(html, url)
-            if not hall or not hall["name"]:
-                summary["errors"] += 1
-                continue
-            parsed.append(hall)
-            time.sleep(REQUEST_DELAY)
+    started = datetime.now()
+    _record(started_at=started.isoformat(), ok=None, reason="running")
+    summary = {
+        "halls": 0, "screenings": 0, "errors": 0,
+        "discovered": 0, "replaced": False, "reason": "",
+    }
+    try:
+        halls, discovered, errors = scrape_halls(limit)
+    except Exception as e:  # noqa: BLE001 - scraping is best-effort
+        log.warning("scrape failed: %s", e)
+        with _status_lock:
+            fails = LAST_RUN.get("consecutive_failures", 0) + 1
+        _record(
+            finished_at=datetime.now().isoformat(), ok=False,
+            reason="scrape error: %s" % e, consecutive_failures=fails,
+        )
+        summary["reason"] = "scrape error: %s" % e
+        return summary
 
-    # Only wipe when the run was healthy (>=50% of discovered halls parsed).
-    healthy = urls and len(parsed) >= max(1, len(urls) // 2)
+    summary["halls"] = len(halls)
+    summary["discovered"] = discovered
+    summary["errors"] = errors
+
     db = SessionLocal()
     try:
-        if wipe and healthy:
-            db.query(models.Screening).delete()
-            db.query(models.Movie).delete()
-            db.query(models.Cinema).delete()
-            db.commit()
-        elif wipe and not healthy:
-            log.warning(
-                "partial scrape (%d/%d halls) - upserting without wipe",
-                len(parsed), len(urls),
-            )
-        for hall in parsed:
-            save_hall(db, hall)
-            summary["halls"] += 1
-            summary["screenings"] += len(hall["screenings"])
+        existing = db.query(models.Cinema).count()
+        may_replace, reason = replace_decision(len(halls), discovered, existing)
+        replace = bool(wipe and may_replace)
+        if wipe and not may_replace:
+            log.warning("not replacing dataset - %s; merging instead", reason)
+        summary["screenings"] = publish(db, halls, replace=replace)
+        summary["replaced"] = replace
+        summary["reason"] = reason
     finally:
         db.close()
+
+    ok = summary["halls"] > 0
+    with _status_lock:
+        fails = 0 if ok else LAST_RUN.get("consecutive_failures", 0) + 1
+    _record(
+        finished_at=datetime.now().isoformat(), ok=ok,
+        halls=summary["halls"], discovered=discovered,
+        screenings=summary["screenings"], errors=errors,
+        replaced=summary["replaced"], reason=summary["reason"],
+        consecutive_failures=fails,
+    )
     log.info("scrape summary: %s", summary)
     return summary
 

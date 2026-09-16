@@ -1,6 +1,11 @@
 """
-Seed the database with real Athens cinemas and a few days of sample
-screenings, so the app is fully demoable before the live scraper is tuned.
+Invented sample data for LOCAL DEVELOPMENT ONLY.
+
+The cinemas are real Athens venues but the movies and showtimes are made up.
+This must never be served in production: it used to be the startup fallback for
+an empty database, and users ended up staring at these eleven cinemas believing
+they were live listings. `/admin/seed` is now gated behind ALLOW_SEED=1 and
+startup loads `app/snapshot.py` (a real scrape) instead.
 
 Run:  python -m app.seed
 Coordinates are approximate but real, so the map pins land in the right place.

@@ -23,3 +23,5 @@ Thumbs.db
 # Stray screenshots (e.g. saved from a phone into the project folder)
 Screenshot_*.jpg
 Screenshot_*.png
+backend/movienearme.db-wal
+backend/movienearme.db-shm

@@ -9,12 +9,33 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.5"
-      - key: DB_PATH
-        value: /var/data/movienearme.db
+
+# Persistence
+# -----------
+# There is deliberately no `disk:` here. Render only allows a persistent disk on
+# a PAID instance type, so declaring one on `plan: free` makes the blueprint
+# invalid — an earlier attempt to add one is why the database was still being
+# lost on every restart.
+#
+# The service does not need it. A cold start loads
+# backend/app/data/cinemas_snapshot.json.gz (real listings, refreshed daily by
+# .github/workflows/snapshot.yml) and then scrapes live, so an empty filesystem
+# costs freshness for well under a minute, never correctness.
+#
+# If you do upgrade to a paid plan, re-add persistence with:
+#
+#   plan: starter
+#   disk:
+#     name: data
+#     mountPath: /var/data
+#     sizeGB: 1
+#   envVars:
+#     - key: DB_PATH
+#       value: /var/data/movienearme.db
+#
+# DB_PATH is honoured wherever it points; if the path turns out not to be
+# writable the app logs a warning and falls back to a local file instead of
+# failing to boot.

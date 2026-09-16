@@ -1,0 +1,78 @@
+name: refresh-snapshot
+
+# Keeps backend/app/data/cinemas_snapshot.json.gz current.
+#
+# That file is what a cold-started Render instance serves before its first live
+# scrape finishes. Render's free tier loses the SQLite database on every
+# restart, so without a fresh snapshot a restart used to leave the app showing
+# invented sample data. Refreshing it daily means the worst case is listings a
+# few hours old, never wrong ones.
+#
+# Athinorama publishes the whole cinema week (Thu-Wed) on each hall page, so a
+# snapshot stays useful for days even if a run is missed.
+
+on:
+  schedule:
+    # 03:20 UTC — early morning in Athens, after the listings for the day are up.
+    - cron: "20 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Scrape and rewrite the snapshot
+        working-directory: backend
+        # Fails the job rather than committing a thin snapshot: a bad snapshot
+        # is worse than yesterday's good one.
+        run: |
+          python - <<'PY'
+          import logging, sys
+          logging.basicConfig(level=logging.WARNING)
+          from app import snapshot
+
+          MIN_EXPECTED = 80
+          result = snapshot.refresh()
+          print("halls=%(halls)s discovered=%(discovered)s errors=%(errors)s"
+                % result)
+          if result["halls"] < MIN_EXPECTED:
+              sys.exit(
+                  "only %d halls scraped (expected >= %d) - keeping the "
+                  "previous snapshot" % (result["halls"], MIN_EXPECTED)
+              )
+          PY
+
+      - name: Verify the new snapshot loads
+        working-directory: backend
+        run: python -m pytest tests/test_snapshot.py -q
+
+      - name: Commit if the listings changed
+        run: |
+          if git diff --quiet -- backend/app/data/cinemas_snapshot.json.gz; then
+            echo "snapshot unchanged"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/data/cinemas_snapshot.json.gz
+          git commit -m "Refresh cinema snapshot ($(date -u +%Y-%m-%d))"
+          git push

@@ -4,6 +4,11 @@ name: keep-alive
 # a free service down after ~15 min idle). Runs every 10 minutes.
 # Note: GitHub disables scheduled workflows after 60 days with no repo commits,
 # and cron timing can drift a few minutes under load.
+#
+# It also acts as the data-quality alarm: /health reports "degraded" when too
+# few cinemas have upcoming screenings. That is exactly the state nobody
+# noticed for weeks while the app served eleven placeholder cinemas, so this
+# job now fails loudly instead of only keeping the instance warm.
 
 on:
   schedule:
@@ -14,6 +19,34 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping /health
+      - name: Ping /health and check the data is real
         run: |
-          curl -fsS --max-time 90 https://movienearme.onrender.com/health || true
+          check() {
+            curl -fsS --max-time 90 https://movienearme.onrender.com/health
+          }
+
+          body=$(check || true)
+          echo "$body"
+
+          status=$(echo "$body" | python3 -c \
+            "import json,sys; print(json.load(sys.stdin).get('status','unreachable'))" \
+            2>/dev/null || echo unreachable)
+
+          if [ "$status" = "ok" ]; then
+            exit 0
+          fi
+
+          # A cold start is briefly degraded while the first scrape runs, so
+          # give it time before crying wolf.
+          echo "status=$status - re-checking in 150s"
+          sleep 150
+          body=$(check || true)
+          echo "$body"
+          status=$(echo "$body" | python3 -c \
+            "import json,sys; print(json.load(sys.stdin).get('status','unreachable'))" \
+            2>/dev/null || echo unreachable)
+
+          if [ "$status" != "ok" ]; then
+            echo "::error::backend health is '$status' - the app is probably showing few or no cinemas"
+            exit 1
+          fi
