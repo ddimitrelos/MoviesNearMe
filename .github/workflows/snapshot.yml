@@ -16,6 +16,12 @@ on:
     # 03:20 UTC — early morning in Athens, after the listings for the day are up.
     - cron: "20 3 * * *"
   workflow_dispatch: {}
+  # Editing this workflow runs it, so a change to the refresh job is verified
+  # immediately instead of at the next nightly window. The job's own snapshot
+  # commit doesn't touch this file, so it cannot re-trigger itself.
+  push:
+    paths:
+      - '.github/workflows/snapshot.yml'
 
 permissions:
   contents: write
