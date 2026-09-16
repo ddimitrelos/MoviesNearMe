@@ -44,7 +44,9 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # pytest is needed by the verification step below; it is not a runtime
+          # dependency, so it is installed here the same way backend-ci does it.
+          pip install -r requirements.txt pytest
 
       - name: Scrape and rewrite the snapshot
         working-directory: backend
