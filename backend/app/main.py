@@ -53,8 +53,9 @@ Base.metadata.create_all(bind=engine)
 # How often the supervisor wakes up to check the data.
 CHECK_INTERVAL_SECONDS = 300
 # A dataset older than this is refreshed even if it still looks healthy.
-REFRESH_AFTER_HOURS = 6
-# Fewer cinemas than this showing anything upcoming means something is wrong;
+# Also how quickly a newly published programme week gets picked up.
+REFRESH_AFTER_HOURS = 4
+# Fewer cinemas than this carrying today's listings means something is wrong;
 # refresh immediately instead of waiting for the next daily window. The old
 # 24h sleep is why a bad scrape could leave production broken for a full day.
 MIN_HEALTHY_CINEMAS = 30
@@ -79,13 +80,25 @@ app.add_middleware(
 
 def _data_state(db: Session, now: Optional[datetime] = None) -> dict:
     now = now or datetime.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     upcoming = db.query(models.Screening).filter(models.Screening.start_time >= now)
+    # Counted from midnight, not from "now": athinorama publishes one programme
+    # week (Thu-Wed), so late on the last evening of a week everything is
+    # technically in the past until the new week goes up. Judging health from
+    # `now` would call that a failure every Wednesday night and make the
+    # supervisor re-scrape every five minutes for hours.
+    current = db.query(models.Screening).filter(
+        models.Screening.start_time >= midnight
+    )
     return {
         "cinemas": db.query(func.count(models.Cinema.id)).scalar() or 0,
         "movies": db.query(func.count(models.Movie.id)).scalar() or 0,
         "screenings": db.query(func.count(models.Screening.id)).scalar() or 0,
         "upcoming_screenings": upcoming.count(),
         "cinemas_with_upcoming": upcoming.with_entities(
+            models.Screening.cinema_id
+        ).distinct().count(),
+        "cinemas_with_current_data": current.with_entities(
             models.Screening.cinema_id
         ).distinct().count(),
     }
@@ -99,9 +112,9 @@ def needs_scrape(state: dict, last: dict, now: Optional[datetime] = None) -> tup
     without a network or a clock.
     """
     now = now or datetime.now()
-    if state["cinemas_with_upcoming"] < MIN_HEALTHY_CINEMAS:
-        return True, "only %d cinemas have upcoming screenings" % (
-            state["cinemas_with_upcoming"],
+    if state["cinemas_with_current_data"] < MIN_HEALTHY_CINEMAS:
+        return True, "only %d cinemas have current listings" % (
+            state["cinemas_with_current_data"],
         )
     finished = last.get("finished_at")
     if not last.get("ok") or not finished:
@@ -181,10 +194,10 @@ def bootstrap_data() -> None:
     db = SessionLocal()
     try:
         state = _data_state(db)
-        if state["cinemas_with_upcoming"] < MIN_HEALTHY_CINEMAS:
+        if state["cinemas_with_current_data"] < MIN_HEALTHY_CINEMAS:
             log.info(
-                "bootstrap: only %d cinemas with upcoming screenings - "
-                "loading snapshot", state["cinemas_with_upcoming"],
+                "bootstrap: only %d cinemas have current listings - "
+                "loading snapshot", state["cinemas_with_current_data"],
             )
             try:
                 loaded = snapshot.load_into(db)
@@ -229,7 +242,7 @@ def health(db: Session = Depends(get_db)):
     """
     state = _data_state(db)
     last = scraper.last_run()
-    degraded = state["cinemas_with_upcoming"] < MIN_HEALTHY_CINEMAS
+    degraded = state["cinemas_with_current_data"] < MIN_HEALTHY_CINEMAS
     return {
         "status": "degraded" if degraded else "ok",
         # legacy keys kept for the keep-alive ping and older clients
@@ -238,6 +251,7 @@ def health(db: Session = Depends(get_db)):
         "screenings": state["screenings"],
         "upcoming_screenings": state["upcoming_screenings"],
         "cinemas_with_upcoming": state["cinemas_with_upcoming"],
+        "cinemas_with_current_data": state["cinemas_with_current_data"],
         "min_healthy_cinemas": MIN_HEALTHY_CINEMAS,
         "last_scrape": last,
         "snapshot": snapshot.info(),

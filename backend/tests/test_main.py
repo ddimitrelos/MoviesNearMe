@@ -14,7 +14,7 @@ from fastapi import HTTPException
 
 from app import main, models, scraper
 
-from conftest import make_halls
+from conftest import make_hall, make_halls
 
 
 # --- startup bootstrap -------------------------------------------------------
@@ -95,7 +95,8 @@ def test_bootstrap_survives_a_broken_snapshot(db):
 # --- refresh policy ----------------------------------------------------------
 
 FRESH = {"cinemas": 109, "movies": 100, "screenings": 2664,
-         "upcoming_screenings": 700, "cinemas_with_upcoming": 104}
+         "upcoming_screenings": 700, "cinemas_with_upcoming": 104,
+         "cinemas_with_current_data": 108}
 
 OK_RUN = {"ok": True, "finished_at": datetime.now().isoformat(),
           "consecutive_failures": 0}
@@ -109,10 +110,21 @@ def test_no_scrape_needed_when_data_is_fresh():
 
 def test_scrape_needed_when_only_a_few_cinemas_have_showtimes():
     """Eleven cinemas must trigger an immediate refresh, not a 24 h wait."""
-    thin = {**FRESH, "cinemas_with_upcoming": 11}
+    thin = {**FRESH, "cinemas_with_current_data": 11}
     due, reason = main.needs_scrape(thin, OK_RUN)
     assert due is True
     assert "11 cinemas" in reason
+
+
+def test_no_scrape_storm_at_the_end_of_a_programme_week():
+    """
+    Athinorama publishes one week at a time (Thu-Wed). Late on the last night
+    every screening it listed is in the past, which must not be read as a
+    failure - otherwise the supervisor re-scrapes every 5 minutes for hours.
+    """
+    end_of_week = {**FRESH, "upcoming_screenings": 0, "cinemas_with_upcoming": 0}
+    due, reason = main.needs_scrape(end_of_week, OK_RUN)
+    assert due is False, reason
 
 
 def test_scrape_needed_before_the_first_successful_run():
@@ -181,6 +193,42 @@ def test_health_reports_degraded_when_only_a_few_cinemas_show(db):
 
 def test_health_reports_degraded_on_an_empty_database(db):
     assert main.health(db)["status"] == "degraded"
+
+
+def test_todays_listings_count_even_after_the_last_show(db):
+    """
+    The end-of-programme-week case, measured against the real database.
+
+    At 23:59 on the last night of a published week nothing is "upcoming", but
+    the week's data is present and correct - so this must not read as a failure.
+    """
+    day = datetime(2026, 9, 16)
+    scraper.publish(
+        db,
+        [make_hall(f"t-{i}", when=day.replace(hour=20)) for i in range(40)],
+        replace=True,
+    )
+
+    state = main._data_state(db, now=day.replace(hour=23, minute=59))
+
+    assert state["cinemas_with_upcoming"] == 0
+    assert state["cinemas_with_current_data"] == 40
+    assert main.needs_scrape(state, OK_RUN)[0] is False
+
+
+def test_yesterdays_listings_do_not_count_as_current(db):
+    """The flip side: genuinely stale data must still trigger a refresh."""
+    day = datetime(2026, 9, 16)
+    scraper.publish(
+        db,
+        [make_hall(f"t-{i}", when=day.replace(hour=20)) for i in range(40)],
+        replace=True,
+    )
+
+    state = main._data_state(db, now=day + timedelta(days=1))
+
+    assert state["cinemas_with_current_data"] == 0
+    assert main.needs_scrape(state, OK_RUN)[0] is True
 
 
 def test_health_reports_where_the_database_lives(db):

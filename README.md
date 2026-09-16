@@ -96,8 +96,12 @@ Four rules now keep that from recurring:
    past screenings are pruned so nothing stale accumulates. The write happens
    in one transaction, so clients never see a half-populated database.
 3. **Self-healing refresh.** A supervisor thread re-scrapes whenever fewer than
-   30 cinemas have upcoming showtimes, the data is over 6 hours old, or the last
-   run failed (with backoff) — instead of sleeping for a day.
+   30 cinemas carry listings for today, the data is over 4 hours old, or the
+   last run failed (with backoff) — instead of sleeping for a day. "For today"
+   rather than "from now" on purpose: athinorama publishes one week at a time
+   (Thu–Wed), so on the last night of a week everything it listed is already
+   past, and measuring from the clock would read that as a failure and re-scrape
+   every five minutes for hours.
 4. **Failure is visible.** `/health` returns `status: "degraded"` whenever the
    map would look thin, and reports the last scrape, snapshot age, and whether
    the database is on a persistent disk. The keep-alive workflow fails on a
