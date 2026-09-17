@@ -231,7 +231,12 @@ def haversine_km(lat1, lng1, lat2, lng2) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
-@app.get("/health")
+# HEAD as well as GET: uptime checkers (UptimeRobot among them) send HEAD by
+# default, and FastAPI answers a GET-only route with 405. The UptimeRobot
+# monitor for this service sat in "Down" for nearly two months because of that,
+# while the service was perfectly healthy - which made the one alarm that
+# should have caught the eleven-cinema outage useless.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health(db: Session = Depends(get_db)):
     """
     Health plus a full data-quality report.

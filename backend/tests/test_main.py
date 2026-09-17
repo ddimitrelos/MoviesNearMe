@@ -251,3 +251,24 @@ def test_seeding_is_allowed_when_explicitly_enabled(monkeypatch):
     with patch.object(main.seed_module, "seed") as mock_seed:
         assert main.trigger_seed() == {"status": "seeded"}
     mock_seed.assert_called_once()
+
+
+# --- uptime checkers ---------------------------------------------------------
+
+def test_health_answers_head_as_well_as_get(db):
+    """
+    Uptime checkers send HEAD by default.
+
+    A GET-only route answers 405, which reads as "down". The UptimeRobot
+    monitor for this service reported down for ~2 months for exactly that
+    reason while the API was fine, so the only external alarm was worthless.
+    """
+    from fastapi.testclient import TestClient
+
+    main.app.dependency_overrides[main.get_db] = lambda: db
+    try:
+        client = TestClient(main.app)
+        assert client.head("/health").status_code == 200
+        assert client.get("/health").status_code == 200
+    finally:
+        main.app.dependency_overrides.clear()
