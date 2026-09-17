@@ -64,6 +64,12 @@ MIN_HALLS_FOR_REPLACE = 30          # absolute floor
 REPLACE_RATIO_DISCOVERED = 0.6      # vs. hall URLs found on the landing pages
 REPLACE_RATIO_EXISTING = 0.7        # vs. cinemas already in the database
 
+# When the database has nothing worth showing, halls are committed in batches of
+# this size as they are scraped, so the map fills up progressively. With data
+# already in place the write stays atomic instead - there is something to
+# protect then, and a half-written refresh would be a regression.
+BOOTSTRAP_BATCH_SIZE = 8
+
 LD_JSON_RE = re.compile(
     r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
     re.S | re.I,
@@ -455,6 +461,23 @@ def prune_past_screenings(db: Session, before: Optional[datetime] = None) -> int
     return int(deleted or 0)
 
 
+def current_cinema_count(db: Session, now: Optional[datetime] = None) -> int:
+    """
+    Cinemas with listings for today or later.
+
+    Measured from midnight rather than `now` because athinorama publishes one
+    programme week at a time; see main._data_state for the full reasoning.
+    """
+    now = now or datetime.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        db.query(models.Screening.cinema_id)
+        .filter(models.Screening.start_time >= midnight)
+        .distinct()
+        .count()
+    )
+
+
 def replace_decision(parsed: int, discovered: int, existing: int) -> tuple:
     """
     Decide whether a scrape result is allowed to replace the whole dataset.
@@ -510,8 +533,20 @@ def _fetch_and_parse(client: httpx.Client, url: str) -> Optional[dict]:
     return hall
 
 
-def scrape_halls(limit: Optional[int] = None) -> tuple:
-    """Fetch and parse every hall concurrently -> (halls, discovered, errors)."""
+def scrape_halls(limit: Optional[int] = None, on_batch=None,
+                 batch_size: int = BOOTSTRAP_BATCH_SIZE) -> tuple:
+    """
+    Fetch and parse every hall concurrently -> (halls, discovered, errors).
+
+    `on_batch` is called with a list of halls every `batch_size` results, so a
+    caller with nothing in the database can publish as data arrives instead of
+    waiting for the whole run. On the free Render instance a full run takes
+    ~3 minutes; without this, a cold start with no usable snapshot shows an
+    empty map for all of it.
+    """
+    attempted = 0
+    halls: list = []
+    batch: list = []
     with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
         urls = discover_hall_urls(client)
         log.info("discovered %d hall urls", len(urls))
@@ -521,11 +556,22 @@ def scrape_halls(limit: Optional[int] = None) -> tuple:
         if not urls:
             return [], discovered, 0
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            results = list(pool.map(lambda u: _fetch_and_parse(client, u), urls))
-    halls = [h for h in results if h]
+            for hall in pool.map(lambda u: _fetch_and_parse(client, u), urls):
+                attempted += 1
+                if not hall:
+                    continue
+                halls.append(hall)
+                if on_batch is None:
+                    continue
+                batch.append(hall)
+                if len(batch) >= batch_size:
+                    on_batch(list(batch))
+                    batch = []
+        if on_batch is not None and batch:
+            on_batch(batch)
     # When a limit is set, judge completeness against the limited set.
     expected = len(urls) if limit else discovered
-    return halls, expected, len(results) - len(halls)
+    return halls, expected, attempted - len(halls)
 
 
 # --- Run status (surfaced on /health) ---------------------------------------
@@ -541,6 +587,7 @@ LAST_RUN: dict = {
     "errors": 0,
     "replaced": None,
     "reason": None,
+    "bootstrapped": None,
     "consecutive_failures": 0,
 }
 
@@ -559,18 +606,47 @@ def run_scrape(limit: Optional[int] = None, wipe: bool = True) -> dict:
     """
     Scrape all halls into the database. Returns a small summary dict.
 
-    Halls are parsed into memory first and written in a single transaction. The
-    destructive replace only runs when `replace_decision` says the result looks
-    complete, so a flaky network can never shrink or empty production.
+    With a healthy dataset in place, halls are parsed into memory first and
+    written in a single transaction, and the destructive replace only runs when
+    `replace_decision` says the result looks complete - so a flaky network can
+    never shrink or empty production.
+
+    With nothing worth showing, the run instead publishes in batches as halls
+    arrive, because then there is no good data to protect and an empty map is
+    the worst possible answer.
     """
     started = datetime.now()
     _record(started_at=started.isoformat(), ok=None, reason="running")
     summary = {
         "halls": 0, "screenings": 0, "errors": 0,
         "discovered": 0, "replaced": False, "reason": "",
+        "bootstrapped": False,
     }
+
+    # Nothing worth showing right now? Then publish as we go, so the map fills
+    # in seconds instead of after the whole run. This is the path a cold start
+    # with a stale snapshot takes - the case that showed "0 cinemas".
+    db = SessionLocal()
     try:
-        halls, discovered, errors = scrape_halls(limit)
+        bootstrapping = current_cinema_count(db) < MIN_HALLS_FOR_REPLACE
+    finally:
+        db.close()
+
+    def publish_batch(batch: list) -> None:
+        batch_db = SessionLocal()
+        try:
+            publish(batch_db, batch, replace=False)
+            log.info("bootstrap: published %d more halls", len(batch))
+        except Exception as e:  # noqa: BLE001 - a bad batch must not stop the run
+            log.warning("bootstrap batch failed: %s", e)
+        finally:
+            batch_db.close()
+
+    summary["bootstrapped"] = bootstrapping
+    try:
+        halls, discovered, errors = scrape_halls(
+            limit, on_batch=publish_batch if bootstrapping else None
+        )
     except Exception as e:  # noqa: BLE001 - scraping is best-effort
         log.warning("scrape failed: %s", e)
         with _status_lock:
@@ -607,7 +683,7 @@ def run_scrape(limit: Optional[int] = None, wipe: bool = True) -> dict:
         halls=summary["halls"], discovered=discovered,
         screenings=summary["screenings"], errors=errors,
         replaced=summary["replaced"], reason=summary["reason"],
-        consecutive_failures=fails,
+        bootstrapped=summary["bootstrapped"], consecutive_failures=fails,
     )
     log.info("scrape summary: %s", summary)
     return summary

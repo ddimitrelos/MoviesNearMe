@@ -176,6 +176,36 @@ def load_into(db: Session, path: Optional[Path] = None) -> Optional[dict]:
     }
 
 
+# A committed snapshot with at least this many upcoming showtimes is still a
+# perfectly good cold-start dataset. Rewriting it anyway would commit on every
+# scheduled run, and since Render auto-deploys on push that means needless
+# restarts. Athinorama publishes a week at a time, so in practice this refreshes
+# once at each programme-week boundary - exactly when it matters.
+KEEP_IF_UPCOMING = 1000
+
+
+def refresh_if_needed(path: Optional[Path] = None) -> dict:
+    """
+    Refresh the snapshot only when the committed one is no longer good enough.
+
+    Returns a summary with "refreshed": False when the existing file was kept.
+    """
+    current = info(path)
+    upcoming = current.get("upcoming_screenings") or 0
+    if current.get("readable") and upcoming >= KEEP_IF_UPCOMING:
+        return {
+            "refreshed": False,
+            "upcoming_screenings": upcoming,
+            "generated_at": current.get("generated_at"),
+            "reason": "committed snapshot still has %d upcoming showtimes"
+                      % upcoming,
+        }
+    result = refresh(path)
+    result["refreshed"] = True
+    result["reason"] = "previous snapshot had only %d upcoming showtimes" % upcoming
+    return result
+
+
 def refresh(path: Optional[Path] = None) -> dict:
     """
     Scrape live and overwrite the snapshot file. Used by the daily CI job.

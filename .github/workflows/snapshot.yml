@@ -13,8 +13,14 @@ name: refresh-snapshot
 
 on:
   schedule:
-    # 03:20 UTC — early morning in Athens, after the listings for the day are up.
-    - cron: "20 3 * * *"
+    # Several slots a day on purpose. GitHub drops scheduled runs freely — this
+    # repo's */10 keep-alive has been observed running only every 2-5 hours — so
+    # a single daily slot is not something to rely on. The job itself is cheap
+    # and only rewrites the snapshot when the committed one has gone stale
+    # (see snapshot.refresh_if_needed), so extra slots cost almost nothing.
+    - cron: "17 3 * * *"
+    - cron: "17 11 * * *"
+    - cron: "17 19 * * *"
   workflow_dispatch: {}
   # Editing this workflow runs it, so a change to the refresh job is verified
   # immediately instead of at the next nightly window. The job's own snapshot
@@ -48,10 +54,10 @@ jobs:
           # dependency, so it is installed here the same way backend-ci does it.
           pip install -r requirements.txt pytest
 
-      - name: Scrape and rewrite the snapshot
+      - name: Refresh the snapshot if the committed one has gone stale
         working-directory: backend
         # Fails the job rather than committing a thin snapshot: a bad snapshot
-        # is worse than yesterday's good one.
+        # is worse than last week's good one.
         run: |
           python - <<'PY'
           import logging, sys
@@ -59,7 +65,10 @@ jobs:
           from app import snapshot
 
           MIN_EXPECTED = 80
-          result = snapshot.refresh()
+          result = snapshot.refresh_if_needed()
+          print(result["reason"])
+          if not result["refreshed"]:
+              sys.exit(0)
           print("halls=%(halls)s discovered=%(discovered)s errors=%(errors)s"
                 % result)
           if result["halls"] < MIN_EXPECTED:

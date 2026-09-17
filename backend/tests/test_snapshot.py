@@ -7,6 +7,7 @@ is present, real, and loadable.
 from datetime import datetime, timedelta
 
 import pytest
+from unittest.mock import patch
 
 from app import models, snapshot
 
@@ -142,3 +143,59 @@ def test_info_reports_freshness():
     assert info["present"] and info["readable"]
     assert info["halls"] >= snapshot.MIN_HALLS
     assert "generated_at" in info
+
+
+# --- refresh gating ----------------------------------------------------------
+# Render auto-deploys on push, so committing a new snapshot on every scheduled
+# run would restart production several times a day for no benefit.
+
+def test_refresh_is_skipped_while_the_snapshot_is_still_good(tmp_path):
+    path = tmp_path / "snap.json.gz"
+    future = datetime.now() + timedelta(hours=5)
+    halls = [
+        make_hall(
+            f"good-{i}",
+            screenings=[
+                dict(
+                    movie_slug=f"m-{i}-{n}", movie_title="T", movie_original=None,
+                    movie_duration=100, movie_genre=None, movie_poster=None,
+                    movie_url=None, hall="H", start_time=future,
+                )
+                for n in range(30)
+            ],
+        )
+        for i in range(40)
+    ]
+    snapshot.write(halls, path)
+    assert snapshot.info(path)["upcoming_screenings"] >= snapshot.KEEP_IF_UPCOMING
+
+    with patch.object(snapshot, "refresh") as mock_refresh:
+        result = snapshot.refresh_if_needed(path)
+
+    mock_refresh.assert_not_called()
+    assert result["refreshed"] is False
+    assert "still has" in result["reason"]
+
+
+def test_refresh_runs_when_the_snapshot_has_expired(tmp_path):
+    """The Thursday case: last week's snapshot must be replaced."""
+    path = tmp_path / "snap.json.gz"
+    snapshot.write(
+        [make_hall(f"old-{i}", when=datetime.now() - timedelta(days=3))
+         for i in range(40)],
+        path,
+    )
+    assert snapshot.info(path)["upcoming_screenings"] == 0
+
+    with patch.object(snapshot, "refresh", return_value={"halls": 100}) as mock:
+        result = snapshot.refresh_if_needed(path)
+
+    mock.assert_called_once_with(path)
+    assert result["refreshed"] is True
+
+
+def test_refresh_runs_when_there_is_no_snapshot_at_all(tmp_path):
+    with patch.object(snapshot, "refresh", return_value={"halls": 100}) as mock:
+        result = snapshot.refresh_if_needed(tmp_path / "missing.json.gz")
+    mock.assert_called_once()
+    assert result["refreshed"] is True
