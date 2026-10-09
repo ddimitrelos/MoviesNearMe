@@ -1,5 +1,8 @@
 """Unit tests for the JSON-LD parsing (no network)."""
 
+from unittest.mock import patch
+
+from app import scraper
 from app.scraper import parse_hall
 
 # Minimal hall page: one MovieTheater + one ScreeningEvent carrying a poster
@@ -42,3 +45,44 @@ def test_parse_hall_captures_poster_and_movie_url():
     assert s["movie_original"] == "The Odyssey"
     # duration derived from start/end (172 min)
     assert s["movie_duration"] == 172
+
+
+# --- discover_hall_urls: a landing page can come back transiently empty -----
+# Context: run #68 of refresh-snapshot found only 50/~109 halls with zero
+# per-hall errors - the shortfall was upstream, in discovery, not in parsing.
+# A landing page that fetch() got a 200 for but held no hall links (a
+# transient partial/challenge response) is now retried once before being
+# treated as genuinely empty.
+
+GUIDE_HTML = '<a href="/cinema/halls/guide-only-1/">x</a>'
+
+
+def test_landing_page_with_no_links_is_retried_once():
+    # First landing page: empty, then recovers on retry. Second landing page:
+    # fine on the first try. Calls per page are counted separately.
+    calls: dict[str, int] = {}
+
+    def fake_fetch(_client, page):
+        calls[page] = calls.get(page, 0) + 1
+        if page == scraper.LANDING_PAGES[0]:
+            return GUIDE_HTML if calls[page] > 1 else "<html>no links here</html>"
+        return "<html>no links on this page either</html>"
+
+    with (
+        patch.object(scraper, "fetch", side_effect=fake_fetch),
+        patch.object(scraper.time, "sleep"),
+    ):
+        urls = scraper.discover_hall_urls(client=None)
+
+    assert urls == ["https://www.athinorama.gr/cinema/halls/guide-only-1/"]
+    assert calls[scraper.LANDING_PAGES[0]] == 2, "must retry after an empty result"
+
+
+def test_landing_page_still_empty_after_retry_yields_nothing_for_that_page():
+    with (
+        patch.object(scraper, "fetch", return_value=""),
+        patch.object(scraper.time, "sleep"),
+    ):
+        urls = scraper.discover_hall_urls(client=None)
+
+    assert urls == []

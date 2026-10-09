@@ -226,10 +226,14 @@ def fetch(client: httpx.Client, url: str, retries: int = 3) -> Optional[str]:
 def discover_hall_urls(client: httpx.Client) -> list[str]:
     urls: set[str] = set()
     for page in LANDING_PAGES:
-        html = fetch(client, page)
-        if not html:
-            continue
-        for href in HALL_HREF_RE.findall(html):
+        hrefs = HALL_HREF_RE.findall(fetch(client, page) or "")
+        if not hrefs:
+            # fetch() already retries on request failures; a 200 with zero
+            # hall links usually means a transient partial/challenge page
+            # rather than a real empty listing, so give it one more try.
+            time.sleep(2.0)
+            hrefs = HALL_HREF_RE.findall(fetch(client, page) or "")
+        for href in hrefs:
             slug = href.rstrip("/").split("/")[-1]
             if slug and slug != "halls":
                 urls.add(f"{BASE}/cinema/halls/{slug}/")
