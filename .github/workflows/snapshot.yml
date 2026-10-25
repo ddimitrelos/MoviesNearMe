@@ -64,18 +64,15 @@ jobs:
           logging.basicConfig(level=logging.WARNING)
           from app import snapshot
 
-          MIN_EXPECTED = 80
           result = snapshot.refresh_if_needed()
           print(result["reason"])
           if not result["refreshed"]:
               sys.exit(0)
           print("halls=%(halls)s discovered=%(discovered)s errors=%(errors)s"
                 % result)
-          if result["halls"] < MIN_EXPECTED:
-              sys.exit(
-                  "only %d halls scraped (expected >= %d) - keeping the "
-                  "previous snapshot" % (result["halls"], MIN_EXPECTED)
-              )
+          problem = snapshot.completeness_problem(result)
+          if problem:
+              sys.exit(problem + " - keeping the previous snapshot")
           PY
 
       - name: Verify the new snapshot loads

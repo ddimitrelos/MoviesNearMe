@@ -224,6 +224,25 @@ def refresh(path: Optional[Path] = None) -> dict:
     return result
 
 
+# Athinorama's hall count is seasonal: ~100 with the summer open-air cinemas,
+# ~40-50 once they close in autumn (their hall pages 404). A fixed "expect 80"
+# bar therefore failed every autumn refresh and left the snapshot stale, so the
+# bar is the shared floor plus "did we parse nearly everything we discovered".
+MIN_PARSED_RATIO = 0.9
+
+
+def completeness_problem(result: dict) -> Optional[str]:
+    """Why a refresh result is too thin to commit, or None when it is fine."""
+    halls = result.get("halls") or 0
+    discovered = result.get("discovered") or 0
+    if halls < MIN_HALLS:
+        return "only %d halls scraped (minimum %d)" % (halls, MIN_HALLS)
+    if discovered and halls < discovered * MIN_PARSED_RATIO:
+        return "partial scrape: parsed %d of %d discovered halls" % (
+            halls, discovered)
+    return None
+
+
 def _count_upcoming(db: Session) -> int:
     return (
         db.query(models.Screening)

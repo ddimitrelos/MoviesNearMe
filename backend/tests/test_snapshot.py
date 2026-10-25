@@ -199,3 +199,16 @@ def test_refresh_runs_when_there_is_no_snapshot_at_all(tmp_path):
         result = snapshot.refresh_if_needed(tmp_path / "missing.json.gz")
     mock.assert_called_once()
     assert result["refreshed"] is True
+
+
+def test_completeness_accepts_the_autumn_hall_count():
+    # ~41 halls once the summer cinemas close is a real, complete scrape.
+    assert snapshot.completeness_problem(
+        {"halls": 41, "discovered": 41, "errors": 0}) is None
+
+
+def test_completeness_rejects_thin_or_partial_scrapes():
+    assert snapshot.completeness_problem(
+        {"halls": 12, "discovered": 12}) is not None
+    assert snapshot.completeness_problem(
+        {"halls": 50, "discovered": 109}) is not None
