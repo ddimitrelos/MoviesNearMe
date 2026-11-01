@@ -25,3 +25,7 @@ Screenshot_*.jpg
 Screenshot_*.png
 backend/movienearme.db-wal
 backend/movienearme.db-shm
+
+# BMAD per-user config
+_bmad/config.user.toml
+_bmad/custom/config.user.toml
